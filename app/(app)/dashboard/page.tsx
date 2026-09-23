@@ -402,7 +402,7 @@ export default async function DashboardPage({
             </h2>
             {focusProvider && (
               <Link
-                href={`/schedule/provider/${focusProvider.id}?week=${ctx.grid.startDate}`}
+                href={`/providers/${focusProvider.id}?week=${ctx.grid.startDate}`}
                 aria-label="Open this clinician's week"
                 className="grid size-8 shrink-0 place-items-center rounded-full border border-[var(--border-ring)] text-[var(--ink-secondary)]"
               >
@@ -559,7 +559,7 @@ export default async function DashboardPage({
                       </span>
                       <span className="min-w-0 flex-1">
                         <Link
-                          href={`/schedule/patient/${item.patientId}?week=${ctx.grid.startDate}`}
+                          href={`/patients/${item.patientId}?week=${ctx.grid.startDate}`}
                           className="block truncate text-xs font-medium text-[var(--ink-primary)]"
                         >
                           {item.patient}

@@ -195,7 +195,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </p>
           </div>
 
-          <main className="flex-1 px-4 pb-24 lg:px-6 lg:pb-6">{children}</main>
+          {/* Bottom padding clears the floating assistant button on both breakpoints,
+              so it never covers the last card on a long page. */}
+          <main className="flex-1 px-4 pb-28 lg:px-6 lg:pb-24">{children}</main>
         </div>
       </div>
 

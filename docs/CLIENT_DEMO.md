@@ -9,7 +9,7 @@ the markup.
 | Screen | Spec | What it shows |
 |---|---|---|
 | Dashboard | — | Today at a glance; adapts to the signed-in role |
-| Schedules | §46, §53 | Patient and clinician weeks, with availability and school blocks |
+| Schedule | §21, §46 | The practice week: every appointment by day, filterable by service |
 | Patients | §9 | Caseload, hours, requirements met |
 | Clinicians | §11-14, §53 | Availability, credentials, utilization |
 | Assistant | §58-59 | Plain English in, structured request out, engine answers |
@@ -23,6 +23,20 @@ the markup.
 | Configuration | §4, §42, §72 | Services as configuration — adding one is rows, not code |
 | Audit log | §26 | Honestly empty; nothing writes yet |
 | Settings | §64 | Environment, and a plain list of what is missing |
+
+### Detail pages
+
+| Screen | Spec | What it shows |
+|---|---|---|
+| Patient record | §9, §15-17, §10 | Stats, requirements vs authorization, the week, availability and what blocks it, preferences, payer authorizations |
+| Clinician record | §11-14, §53 | Bookability, utilization, credentials with expiry, service eligibility, working hours, caseload, appointments |
+
+Both enforce scope at the page, not just in navigation: a therapist opening a
+patient who is not theirs, or a colleague's record, gets a 404. That was
+verified by request, not assumed.
+
+The patient record links straight to Fill service and Find a time for that
+patient, so the flow from record to action is one tap.
 
 ## The three demo moments
 
@@ -97,3 +111,69 @@ example questions; submitting hands off to `/assistant`.
 The widget never answers anything itself. There is one place where a sentence
 becomes a structured request and the engine replies, and the panel repeats the
 same disclosure: no language model is connected.
+
+## Sign-in and landing
+
+**Sign-in** is two panels. The left states what the build is — an interactive
+prototype of every feature in the specification — and lists the seven roles,
+each row a direct way in: initials, name, what the role does, its permission
+count. A stat strip closes it (14 screens, 17 hard constraints, 7 roles, 0
+decisions made by AI). The right is an ordinary sign-in form: work email,
+password, and a  field.
+
+Presenting the roles on the panel rather than as chips under the form was a
+client request, and it reads better: the form is a form, and the roles get
+room to explain themselves.
+
+The fields are genuine inputs so the design can be judged, but nothing is
+verified. That is said once, next to the button — impossible to miss, and
+impossible to mistake for a security feature.
+
+**Landing page** runs the full marketing sequence: hero with a live slice of
+the real dashboard (not an illustration — the numbers come from the demo
+clinic), a stat strip, six capability cards, a three-step "how it works" that
+states AI never decides the schedule, the seven roles, the pre-PHI checklist,
+and a closing call to action.
+
+### One implementation note
+
+A `<select name="role">` inside a form does reach a server action's FormData,
+which is why the sign-in form works. A `<button name>/<value>` does **not** —
+that was the earlier bug where every role button failed. The quick-access
+chips bind their role into the action instead of relying on the button value.
+
+## Mobile
+
+Every screen was checked at 414px as well as desktop.
+
+- Cards stack; action buttons go full width.
+- Wide tables scroll horizontally inside their card rather than squashing.
+- The week grid scrolls sideways, with a line of text saying so — a silent
+  horizontal scroll is one people do not find.
+- The tab bar holds four destinations plus More, at 56px tall.
+- The floating assistant sits clear of the tab bar and its safe area, and the
+  page has bottom padding on both breakpoints so it never covers the last
+  card. That was a real bug: it was obscuring an authorization figure.
+
+## Navigation: one destination per person
+
+Schedules, Patients and Clinicians were three entries that all led to the same
+people — and the *same card* went to a calendar from one list and a record
+from another. That split was the real problem behind "which should be the
+default".
+
+Resolved by giving each one a distinct job:
+
+- **Schedule** — the practice's week. Every appointment by day, with a day
+  rail carrying counts and a service filter. It owns *time*.
+- **Patients** and **Clinicians** — lists leading to records. They own *people*.
+
+**Records are the canonical destination** everywhere: patient lists, clinician
+lists, the dashboard agenda, the assistant's answers, and the schedule rows
+all lead to the record. The record already embeds the week grid *plus* the
+context needed to act on it — requirements, availability, credentials — so it
+is a superset of the calendar view, not a detour.
+
+The focused calendar (`/schedule/patient/[id]`, `/schedule/provider/[id]`)
+remains one tap away via "Full schedule view" on each record, for when someone
+wants the grid and nothing else.

@@ -116,7 +116,7 @@ export default async function ProvidersPage({
           {rows.map((row) => (
             <li key={row.provider.id}>
               <Link
-                href={`/schedule/provider/${row.provider.id}?week=${ctx.grid.startDate}`}
+                href={`/providers/${row.provider.id}?week=${ctx.grid.startDate}`}
                 className="card block p-4 transition-shadow hover:shadow-[var(--shadow-float)]"
               >
                 <div className="flex items-start gap-3">

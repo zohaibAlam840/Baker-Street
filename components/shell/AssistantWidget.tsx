@@ -134,10 +134,12 @@ export function AssistantWidget({ examples }: { examples: readonly string[] }) {
         onClick={() => setOpen((previous) => !previous)}
         aria-expanded={open}
         aria-label={open ? "Close assistant" : "Open assistant"}
-        className="ml-auto flex h-12 items-center gap-2 rounded-full bg-[var(--brand)] px-4 text-sm font-medium text-white shadow-[var(--shadow-float)] transition-colors hover:bg-[var(--brand-hover)]"
+        // Icon only, and circular: a labelled pill is wider, and this floats
+        // over the right-hand edge of every list — where status badges and
+        // figures live. It was covering them.
+        className="ml-auto grid size-12 place-items-center rounded-full bg-[var(--brand)] text-white shadow-[var(--shadow-float)] transition-colors hover:bg-[var(--brand-hover)]"
       >
         <IconSpark className="size-5" />
-        <span className="hidden sm:inline">Ask</span>
       </button>
     </div>
   );

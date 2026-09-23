@@ -263,7 +263,7 @@ export default async function OptimizePage({
             considered in {analysis.meta.runtime_ms}ms
             {synthetic && " · synthetic data"} ·{" "}
             <Link
-              href={`/schedule/patient/${analysis.patient_id}?week=${ctx.grid.startDate}`}
+              href={`/patients/${analysis.patient_id}?week=${ctx.grid.startDate}`}
               className="underline underline-offset-4"
             >
               see this week

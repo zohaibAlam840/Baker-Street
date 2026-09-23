@@ -31,6 +31,18 @@ export async function signIn(role: string) {
   redirect(ROLE_DEFINITIONS[role].home);
 }
 
+/**
+ * Sign in from the login form.
+ *
+ * Reads the role from a `<select name="role">`. Ordinary form fields do reach
+ * a server action's FormData — it is specifically a `<button name>/<value>`
+ * that does not, which is why the quick-access chips bind their role instead.
+ */
+export async function signInFromForm(formData: FormData) {
+  const role = formData.get("role");
+  await signIn(typeof role === "string" ? role : "");
+}
+
 export async function signOut() {
   const store = await cookies();
   store.delete(SESSION_COOKIE);

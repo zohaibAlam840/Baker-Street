@@ -59,7 +59,7 @@ export default async function ClinicalPage({
                 {summary.required_services_met}/{summary.required_services_total}{" "}
                 required services met ·{" "}
                 <Link
-                  href={`/schedule/patient/${patient.id}?week=${ctx.grid.startDate}`}
+                  href={`/patients/${patient.id}?week=${ctx.grid.startDate}`}
                   className="underline underline-offset-4"
                 >
                   see week

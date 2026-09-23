@@ -177,7 +177,7 @@ export default async function AssistantPage({
           {analysis.meta.candidates_considered} candidate appointments. Nothing
           was booked.{" "}
           <Link
-            href={`/schedule/patient/${request.patient_id}?week=${ctx.grid.startDate}`}
+            href={`/patients/${request.patient_id}?week=${ctx.grid.startDate}`}
             className="underline underline-offset-4"
           >
             See the week

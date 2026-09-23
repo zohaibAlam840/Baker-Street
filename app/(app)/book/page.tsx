@@ -1,10 +1,11 @@
 import Link from "next/link";
 
 import { Card, CardHeader } from "@/components/charts";
+import { evaluateBooking } from "@/lib/rules/engine";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
-import { SLOTS_PER_DAY, SLOT_MINUTES } from "@/lib/domain/slots";
-import { formatClockTime } from "@/lib/domain/time";
+import { SLOTS_PER_DAY, SLOT_MINUTES, minutesToSlots } from "@/lib/domain/slots";
+import { formatClockTime, parseClockTime } from "@/lib/domain/time";
 import { FlatTravelModel } from "@/lib/rules/travel";
 import { findAvailability } from "@/lib/scheduling/availability";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
@@ -28,6 +29,9 @@ export default async function BookPage({
     patient?: string;
     service?: string;
     duration?: string;
+    day?: string;
+    time?: string;
+    provider?: string;
   }>;
 }) {
   await requirePermission("schedule.search_availability");
@@ -56,6 +60,45 @@ export default async function BookPage({
   const duration = params.duration
     ? Number(params.duration)
     : (service?.default_duration_minutes ?? 60);
+
+  // Conflict check (spec section 48): propose an exact time and hear every
+  // reason it is not legal. This is the question a scheduler asks when a
+  // family says "can we do Tuesday at four?" — the opposite direction from
+  // the availability search below.
+  const checkDay = params.day != null ? Number(params.day) : null;
+  const checkTime = params.time ?? null;
+  let check: ReturnType<typeof evaluateBooking> | null = null;
+  let checkRange: { startSlot: number; endSlot: number } | null = null;
+
+  if (patientId && serviceId && checkDay != null && checkTime && !Number.isNaN(checkDay)) {
+    const startSlot =
+      checkDay * SLOTS_PER_DAY + minutesToSlots(parseClockTime(checkTime));
+    checkRange = { startSlot, endSlot: startSlot + minutesToSlots(duration) };
+
+    const provider = params.provider
+      ? ctx.providers.get(params.provider)
+      : ctx.eligibleProviders(serviceId)[0];
+
+    check = evaluateBooking(
+      {
+        patient_id: patientId,
+        service_id: serviceId,
+        provider_id: provider?.id ?? null,
+        location_id: provider?.home_location_id ?? null,
+        authorization_id:
+          ctx.authorizationsFor(patientId, serviceId).find((a) => a.status === "ACTIVE")
+            ?.id ?? null,
+        resource_ids: [],
+        range: checkRange,
+        telehealth: false,
+      },
+      ctx,
+      {
+        travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
+        includeSoft: true,
+      },
+    );
+  }
 
   const slots =
     patientId && serviceId
@@ -119,6 +162,105 @@ export default async function BookPage({
           Search
         </button>
       </form>
+
+      {/* ------------------------- check a specific time ------------------------- */}
+      <Card>
+        <CardHeader
+          title="Check a specific time"
+          sub="“Can we do Tuesday at four?” — every reason it would not be legal"
+        />
+
+        <form className="mt-4 flex flex-wrap items-end gap-3">
+          <input type="hidden" name="patient" value={patientId ?? ""} />
+          <input type="hidden" name="service" value={serviceId ?? ""} />
+          <input type="hidden" name="duration" value={duration} />
+          <input type="hidden" name="week" value={ctx.grid.startDate} />
+
+          <Field label="Day">
+            <select name="day" defaultValue={checkDay ?? 1} className={control}>
+              {Array.from({ length: ctx.grid.dayCount }, (_, day) => (
+                <option key={day} value={day}>
+                  {WEEKDAYS[ctx.grid.weekdayOf(day)]}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Start">
+            <input
+              type="time"
+              name="time"
+              step={900}
+              defaultValue={checkTime ?? "16:00"}
+              className={control}
+            />
+          </Field>
+
+          <button
+            type="submit"
+            className="rounded-full border border-[var(--border-ring)] px-5 py-2.5 text-sm font-medium text-[var(--ink-primary)] transition-colors hover:bg-[var(--surface-sunken)]"
+          >
+            Check
+          </button>
+        </form>
+
+        {check && checkRange && (
+          <div className="mt-4">
+            <p
+              className="flex items-center gap-2 text-sm font-medium"
+              style={{
+                color: check.valid ? "var(--status-good)" : "var(--status-critical)",
+              }}
+            >
+              <span aria-hidden>{check.valid ? "✓" : "✕"}</span>
+              {check.valid
+                ? "That time is legal — it can be booked."
+                : "That time cannot be booked."}
+            </p>
+
+            {check.violations.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {check.violations.map((violation, index) => (
+                  <li
+                    key={`${violation.code}-${index}`}
+                    className="flex items-start gap-2.5 rounded-xl bg-[var(--surface-sunken)] px-3 py-2.5"
+                  >
+                    <span
+                      aria-hidden
+                      className="mt-1.5 inline-block size-1.5 shrink-0 rounded-full"
+                      style={{
+                        background:
+                          violation.severity === "HARD"
+                            ? "var(--status-critical)"
+                            : "var(--status-warning)",
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs text-[var(--ink-primary)]">
+                        {violation.message}
+                      </span>
+                      <span className="block text-[0.625rem] text-[var(--ink-muted)]">
+                        {violation.severity === "HARD" ? "Blocks the booking" : "Trade-off"}{" "}
+                        · {violation.code}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {check.valid && check.violations.length === 0 && (
+              <p className="mt-2 text-xs text-[var(--ink-secondary)]">
+                No conflicts and no trade-offs.
+              </p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <h2 className="pt-2 text-sm font-medium text-[var(--ink-primary)]">
+        Or let it find the best times
+      </h2>
 
       {slots.length === 0 ? (
         <Card>
