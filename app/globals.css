@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * Two colour systems, deliberately separate:
+ *
+ *  BRAND (green) dresses the chrome — buttons, active navigation, logo,
+ *  progress fills. It never identifies a data series.
+ *
+ *  CATEGORICAL (four hues) identifies departments in charts. Every pair clears
+ *  the colourblind-separation and normal-vision floors in BOTH light and dark
+ *  mode, tested against all pairs rather than adjacent ones, because a
+ *  calendar puts arbitrary services side by side. A fifth department folds
+ *  into "other" rather than taking a fifth hue — no fifth colour clears the
+ *  gate against these four.
+ *
+ * Do not substitute the categorical hexes without re-running a palette
+ * validator. --brand is 5.48:1 against white, so white button text passes in
+ * both modes; that is why it is the same value in both.
+ */
+:root {
+  /* Form controls, scrollbars and the like follow this. */
+  color-scheme: light;
+
+  --brand: #047857;
+  --brand-hover: #065f46;
+  --brand-tint: #ecfdf5;
+  --brand-ring: rgb(4 120 87 / 0.18);
+
+  --surface-1: #ffffff; /* cards */
+  --surface-page: #eef1f4; /* the plane the app sits on */
+  --surface-app: #f7f9fa; /* inside the app frame */
+  --surface-sunken: #f1f3f5;
+  --surface-blocked: #eceef0; /* unbookable time on a calendar */
+
+  --ink-primary: #0f1720;
+  --ink-secondary: #566070;
+  --ink-muted: #8b95a3;
+
+  --rule-hairline: #e6e9ed;
+  --rule-strong: #cfd5dc;
+  --border-ring: rgb(15 23 32 / 0.08);
+
+  --shadow-card: 0 1px 2px rgb(15 23 32 / 0.04), 0 1px 3px rgb(15 23 32 / 0.06);
+  --shadow-float: 0 4px 12px rgb(15 23 32 / 0.08), 0 1px 3px rgb(15 23 32 / 0.06);
+
+  /* Categorical: department identity */
+  --dept-other: #8b95a3;
+  --dept-1: #2a78d6; /* ABA */
+  --dept-2: #eda100; /* Behavioral Health */
+  --dept-3: #e87ba4; /* Rehabilitation */
+  --dept-4: #008300; /* Psychology */
+
+  /* Status: reserved, never reused as a series colour */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+
+  --background: var(--surface-page);
+  --foreground: var(--ink-primary);
+}
+
+/*
+ * Light is the product default, deliberately: the client asked for white and
+ * a clinic floor is a bright room. Dark is available but opt-in via
+ * data-theme="dark" — it does NOT follow the operating system, because a
+ * demo that turns dark on someone else laptop is a demo that looks broken.
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --brand: #047857;
+  --brand-hover: #059669;
+  --brand-tint: #06281f;
+  --brand-ring: rgb(16 185 129 / 0.25);
+
+  --surface-1: #17191c;
+  --surface-page: #0b0c0e;
+  --surface-app: #101215;
+  --surface-sunken: #1f2226;
+  --surface-blocked: #131518;
+
+  --ink-primary: #f4f6f8;
+  --ink-secondary: #aeb6c2;
+  --ink-muted: #7d8794;
+
+  --rule-hairline: #262a2f;
+  --rule-strong: #343a41;
+  --border-ring: rgb(255 255 255 / 0.08);
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-float: 0 4px 14px rgb(0 0 0 / 0.5);
+
+  --dept-other: #8b95a3;
+  --dept-1: #3987e5;
+  --dept-2: #c98500;
+  --dept-3: #d55181;
+  --dept-4: #008300;
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-surface: var(--surface-1);
+  --color-page: var(--surface-page);
+  --color-app: var(--surface-app);
+  --color-sunken: var(--surface-sunken);
+  --color-ink: var(--ink-primary);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-hairline: var(--rule-hairline);
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--ink-primary);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Department tint for a calendar block or a legend chip. */
+.dept-0 { --dept: var(--dept-other); }
+.dept-1 { --dept: var(--dept-1); }
+.dept-2 { --dept: var(--dept-2); }
+.dept-3 { --dept: var(--dept-3); }
+.dept-4 { --dept: var(--dept-4); }
+
+/* The standard card. */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-ring);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-card);
+}
+
+/* Hide scrollbars on the horizontal strips (date rail, time chips). */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Respect a reduced-motion preference everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
