@@ -87,31 +87,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </div>
 
           {/*
-            The reference puts a feature card at the foot of the sidebar. Ours
-            promotes the assistant, and says plainly that it is not a model —
-            a card that implied otherwise would be the one dishonest thing on
-            the screen.
+            The assistant used to be promoted with a card down here. It is a
+            chat widget pinned to the bottom-left now, which lands exactly on
+            this spot — so this space is left clear for it rather than
+            advertising the thing that is already visible.
           */}
-          <Link
-            href="/assistant"
-            className="relative block overflow-hidden rounded-2xl p-3.5 text-left"
-            style={{
-              background:
-                "linear-gradient(150deg, color-mix(in srgb, var(--brand) 22%, white) 0%, color-mix(in srgb, var(--dept-2) 16%, white) 55%, white 100%)",
-              border: "1px solid var(--border-ring)",
-            }}
-          >
-            <span className="text-sm font-semibold text-[var(--ink-primary)]">
-              Scheduling assistant
-            </span>
-            <span className="mt-1 block text-[0.6875rem] leading-relaxed text-[var(--ink-secondary)]">
-              Ask in plain English. The engine works out the answer — no model
-              decides anything.
-            </span>
-            <span className="mt-3 block rounded-xl bg-[var(--ink-primary)] px-3 py-2 text-center text-xs font-medium text-[var(--surface-1)]">
-              Ask a question
-            </span>
-          </Link>
+          <div aria-hidden className="h-16 shrink-0" />
         </aside>
 
         {/* ---------------- Main column ---------------- */}
@@ -127,6 +108,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 </span>
               </Link>
 
+              {can(session.role, "view.patient_schedule") ? (
               <label className="relative hidden min-w-0 flex-1 items-center lg:flex">
                 <IconSearch className="pointer-events-none absolute left-3.5 size-4 text-[var(--ink-muted)]" />
                 <span className="sr-only">Search patients, clinicians, appointments</span>
@@ -136,6 +118,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   className="h-10 w-full rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] pl-10 pr-4 text-sm text-[var(--ink-primary)] outline-none placeholder:text-[var(--ink-muted)] focus:ring-2 focus:ring-[var(--brand-ring)]"
                 />
               </label>
+              ) : (
+                <span className="hidden flex-1 lg:block" />
+              )}
 
               <div className="ml-auto flex items-center gap-2">
                 <button
@@ -146,6 +131,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   <IconBell className="size-[18px]" />
                 </button>
 
+                {can(session.role, "view.patient_schedule") && (
                 <Link
                   href="/patients"
                   aria-label="Patients"
@@ -154,6 +140,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 >
                   <IconUserPlus className="size-[18px]" />
                 </Link>
+                )}
 
                 <span className="hidden items-center gap-2 rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] px-3.5 py-2 text-xs text-[var(--ink-secondary)] sm:flex">
                   {dateLabel}
@@ -161,6 +148,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
                 {/* The reference's primary action. Ours goes to the reporting
                     view rather than claiming to generate a file. */}
+                {can(session.role, "analytics.capacity") && (
                 <Link
                   href="/capacity"
                   className="hidden items-center gap-2 rounded-full bg-[var(--brand)] px-4 py-2.5 text-xs font-medium text-white transition-colors hover:bg-[var(--brand-hover)] lg:flex"
@@ -168,6 +156,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                   <IconChart className="size-4" />
                   Reports
                 </Link>
+                )}
 
                 <span
                   aria-hidden

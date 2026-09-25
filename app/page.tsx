@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { SegmentBar } from "@/components/charts";
+import { ChatPreview } from "@/components/landing/ChatPreview";
 import {
   IconArrowUpRight,
   IconCalendar,
@@ -12,6 +13,8 @@ import {
   IconStethoscope,
   IconUsers,
 } from "@/components/shell/icons";
+import { answerQuestion } from "@/lib/ai/answer";
+import { interpret } from "@/lib/ai/interpret";
 import { ROLES, ROLE_DEFINITIONS } from "@/lib/auth/roles";
 import { getSession } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
@@ -37,6 +40,25 @@ export default async function LandingPage() {
     ),
   );
 
+  /**
+   * The transcript on the assistant panel below is played out, not written:
+   * these are the parser and the engine answering three real questions about
+   * the demo clinic, at request time. If the fixture changes, the landing
+   * page changes with it.
+   */
+  const transcript = [
+    "Get John to 30 hours of ABA this week without moving his OT or therapy",
+    "How much unused authorization do we have?",
+    "What happens if we hire three more RBTs?",
+  ].map((question) => {
+    const answer = answerQuestion(ctx, interpret(question, ctx));
+    return {
+      user: question,
+      assistant: answer.summary,
+      stats: answer.stats.slice(0, 2),
+    };
+  });
+
   const signedInHref = session ? ROLE_DEFINITIONS[session.role].home : "/login";
   const signedInLabel = session
     ? `Continue as ${ROLE_DEFINITIONS[session.role].label}`
@@ -58,6 +80,7 @@ export default async function LandingPage() {
             {[
               ["What it does", "#features"],
               ["How it works", "#how"],
+              ["Assistant", "#assistant"],
               ["Roles", "#roles"],
               ["Security", "#security"],
             ].map(([label, href]) => (
@@ -78,6 +101,26 @@ export default async function LandingPage() {
             {signedInLabel}
           </Link>
         </div>
+
+        {/* The section links, for phones — they were desktop-only, which left
+            a mobile visitor with one button and a long scroll. */}
+        <nav className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto border-t border-[var(--rule-hairline)] px-5 py-2.5 sm:px-8 md:hidden">
+          {[
+            ["What it does", "#features"],
+            ["How it works", "#how"],
+            ["Assistant", "#assistant"],
+            ["Roles", "#roles"],
+            ["Security", "#security"],
+          ].map(([label, href]) => (
+            <a
+              key={href}
+              href={href}
+              className="whitespace-nowrap rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] px-3 py-1.5 text-xs text-[var(--ink-secondary)]"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
       </header>
 
       <main>
@@ -272,7 +315,7 @@ export default async function LandingPage() {
         </section>
 
         {/* ----------------------------- features ---------------------------- */}
-        <section id="features" className="mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
+        <section id="features" className="scroll-mt-24 mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
           <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
             What it does today
           </h2>
@@ -333,7 +376,7 @@ export default async function LandingPage() {
         </section>
 
         {/* ---------------------------- how it works -------------------------- */}
-        <section id="how" className="border-y border-[var(--rule-hairline)] bg-[var(--surface-1)]">
+        <section id="how" className="scroll-mt-24 border-y border-[var(--rule-hairline)] bg-[var(--surface-1)]">
           <div className="mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
             <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
               How it works
@@ -386,8 +429,77 @@ export default async function LandingPage() {
           </div>
         </section>
 
+        {/* ---------------------------- assistant ---------------------------- */}
+        <section id="assistant" className="scroll-mt-24 mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
+          <div className="grid items-center gap-10 lg:grid-cols-[1fr_1.05fr]">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] px-3 py-1.5 text-xs text-[var(--ink-secondary)]">
+                <IconSpark className="size-3.5 text-[var(--brand)]" />
+                In every corner of the app
+              </span>
+
+              <h2 className="mt-5 text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
+                A chat that can only tell you the truth
+              </h2>
+
+              <p className="mt-4 text-sm leading-relaxed text-[var(--ink-secondary)]">
+                Ask about a patient&rsquo;s hours, spare capacity, or what
+                another hire would buy you — from wherever you are, without
+                leaving the screen you were working on. The assistant sits in
+                the bottom-left corner of every page.
+              </p>
+
+              <ul className="mt-6 space-y-3">
+                {[
+                  [
+                    "It cannot make a number up",
+                    "The sentence becomes a structured request; the scheduling engine computes every figure. Nothing is generated.",
+                  ],
+                  [
+                    "It shows its working",
+                    "How long the engine took, how many candidate appointments it weighed, and whether a better arrangement could exist.",
+                  ],
+                  [
+                    "It cannot book anything",
+                    "Answers and proposals only. Committing a schedule is a human decision with an audit entry behind it.",
+                  ],
+                ].map(([title, body]) => (
+                  <li key={title} className="flex gap-3">
+                    <span
+                      aria-hidden
+                      className="mt-1.5 size-1.5 shrink-0 rounded-full"
+                      style={{ background: "var(--brand)" }}
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-[var(--ink-primary)]">
+                        {title}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-[var(--ink-secondary)]">
+                        {body}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-6 rounded-xl bg-[var(--surface-sunken)] p-3.5 text-xs leading-relaxed text-[var(--ink-secondary)]">
+                <span className="font-medium text-[var(--ink-primary)]">
+                  No language model is connected in this build.
+                </span>{" "}
+                A fixed-phrase parser recognises the question and the engine
+                answers it. That boundary is the architecture the specification
+                asks for — a model, when one is added, replaces the parser and
+                nothing else.
+              </p>
+            </div>
+
+            {/* Real answers, computed above at request time. */}
+            <ChatPreview script={transcript} />
+          </div>
+        </section>
+
         {/* ------------------------------ roles ------------------------------ */}
-        <section id="roles" className="mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
+        <section id="roles" className="scroll-mt-24 mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
           <h2 className="text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
             Built around who does the work
           </h2>
@@ -430,9 +542,7 @@ export default async function LandingPage() {
         </section>
 
         {/* ----------------------------- security ---------------------------- */}
-        <section
-          id="security"
-          className="border-t border-[var(--rule-hairline)] bg-[var(--surface-1)]"
+        <section id="security" className="scroll-mt-24 border-t border-[var(--rule-hairline)] bg-[var(--surface-1)]"
         >
           <div className="mx-auto max-w-[76rem] px-5 py-14 sm:px-8">
             <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr]">

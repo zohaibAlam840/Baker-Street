@@ -39,6 +39,8 @@ export interface StructuredRequest {
   patient_name?: string;
   service_id?: UUID;
   service_name?: string;
+  /** True when no service was named and the patient's largest one was assumed. */
+  assumed_service?: boolean;
   target_hours?: number;
   protected_services?: UUID[];
   provider_type?: string;
@@ -120,6 +122,29 @@ export function interpret(input: string, ctx: ScheduleContext): StructuredReques
     }
   }
 
+  // ---- assume the service when only a patient is named --------------------
+  // "Why can't John reach 40 hours?" names no service, and used to fail.
+  // Falling back to the service the patient already receives most of is what
+  // a colleague would do; the assumption is returned so the UI can say so
+  // rather than quietly answering a different question.
+  let assumedService = false;
+  if (!serviceId && patientId) {
+    const slotsByService = new Map<UUID, number>();
+    for (const appointment of ctx.appointmentsByPatient.get(patientId) ?? []) {
+      slotsByService.set(
+        appointment.service_id,
+        (slotsByService.get(appointment.service_id) ?? 0) +
+          (appointment.range.endSlot - appointment.range.startSlot),
+      );
+    }
+    const largest = [...slotsByService.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (largest) {
+      serviceId = largest[0];
+      serviceName = ctx.services.get(largest[0])?.service_name;
+      assumedService = true;
+    }
+  }
+
   // ---- intent -------------------------------------------------------------
   let intent: Intent = "UNKNOWN";
 
@@ -155,10 +180,10 @@ export function interpret(input: string, ctx: ScheduleContext): StructuredReques
 
   // ---- what we could not place -------------------------------------------
   if (!patientId && (intent === "FILL_SERVICE" || intent === "OPTIMIZE_PATIENT")) {
-    unmatched.push("no patient named");
+    unmatched.push("a patient name");
   }
   if (!serviceId && intent !== "WHAT_IF_HIRE" && intent !== "CHECK_CAPACITY") {
-    unmatched.push("no service named");
+    unmatched.push("a service name");
   }
 
   return {
@@ -167,6 +192,7 @@ export function interpret(input: string, ctx: ScheduleContext): StructuredReques
     patient_name: patientName,
     service_id: serviceId,
     service_name: serviceName,
+    assumed_service: assumedService || undefined,
     target_hours: targetHours,
     protected_services: protectedServices.length > 0 ? protectedServices : undefined,
     provider_type: providerType,

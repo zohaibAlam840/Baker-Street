@@ -177,3 +177,57 @@ is a superset of the calendar view, not a detour.
 The focused calendar (`/schedule/patient/[id]`, `/schedule/provider/[id]`)
 remains one tap away via "Full schedule view" on each record, for when someone
 wants the grid and nothing else.
+
+## The assistant is a chat now
+
+It used to be a launcher: you typed a question, it navigated to `/assistant`,
+and the page answered — so asking anything threw away the screen you were on.
+It now holds a conversation in place.
+
+- **Bottom-left, on every page.** A launcher on desktop; a sheet above the tab
+  bar on a phone.
+- **The answer arrives in the thread.** `POST /api/assistant` parses the
+  sentence, the engine computes the answer, and the bubble carries the
+  figures, the suggested appointments, the blocking constraints, and links to
+  the records involved.
+- **The conversation survives a reload**, kept in `sessionStorage`.
+- **The header says what it is** — "Engine-backed · no language model" — because
+  the widget now looks exactly like a chatbot, and that is the one place
+  someone could reasonably assume a model is thinking.
+
+### One computation, two surfaces
+
+`lib/ai/answer.ts` turns a parsed request into plain answer data, and
+`components/assistant/AnswerView.tsx` renders it. The chat widget and the full
+`/assistant` page both use them, so the two cannot drift apart. Previously the
+page computed its answer inline and the widget had none of its own.
+
+### Parser fixes found by testing the suggestions
+
+Every phrasing the UI offers as a chip is now covered by a test, which caught
+two failures:
+
+- **"Why can't John reach 40 hours?" named no service and failed outright.**
+  It now falls back to the service the patient receives most of, and *says so*
+  in the answer — assuming silently would be the assistant appearing to know
+  something it does not.
+- **An unreachable target was not reported as unreachable.** Asking about 40
+  hours and being told "can reach 30 hours" reads as though the question was
+  misheard. The answer now leads with the shortfall and the engine's reasons.
+
+## Scoping leaks found and closed
+
+Two, both on the dashboard:
+
+- **The compliance officer holds `audit.read` and nothing else**, but the
+  dashboard was gated only on having a session — so they landed on patient
+  demographics, service mix and a named clinician's week. They now get an
+  oversight screen of counts, with nothing that identifies a patient or a
+  clinician, and the search box, add-patient shortcut and Reports button are
+  hidden for roles that cannot use them.
+- **A therapist saw practice-wide patient demographics.** A clinician with one
+  patient this week was shown the age spread of all twenty. It is now their
+  own cohort.
+
+The pattern in both: least privilege has to hold on the landing screen, not
+only on the pages behind a permission check.

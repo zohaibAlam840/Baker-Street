@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import { IconArrowUpRight, IconLogo } from "@/components/shell/icons";
-import { signIn, signInFromForm } from "@/lib/auth/actions";
+import { IconLogo } from "@/components/shell/icons";
+import { signInFromForm } from "@/lib/auth/actions";
 import { ROLES, ROLE_DEFINITIONS, type Role } from "@/lib/auth/roles";
 
 export const dynamic = "force-dynamic";
@@ -90,53 +90,86 @@ export default async function LoginPage({
                 Sign in as any role
               </p>
 
-              <ul className="mt-3 divide-y divide-white/10">
+              {/*
+                These rows *select* a role rather than signing in on the spot.
+                Before, the left panel signed you in instantly while the right
+                panel had its own role menu — two ways in, disagreeing, and the
+                email field on the right never changed because nothing ever set
+                the selection. Now the left says who you are and the right signs
+                you in, which is also the shape a real identity provider takes.
+              */}
+              <ul className="mt-3 space-y-0.5">
                 {ROLES.map((value) => {
                   const definition = ROLE_DEFINITIONS[value];
+                  const active = value === selected;
                   return (
                     <li key={value}>
-                      <form action={signIn.bind(null, value)}>
-                        <button
-                          type="submit"
-                          className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-white/10"
+                      <Link
+                        href={`/login?role=${value}#sign-in`}
+                        aria-current={active ? "true" : undefined}
+                        className={[
+                          "group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
+                          active ? "bg-white/15" : "hover:bg-white/10",
+                        ].join(" ")}
+                      >
+                        <span
+                          aria-hidden
+                          className={[
+                            "grid size-9 shrink-0 place-items-center rounded-full text-[0.6875rem] font-semibold",
+                            active ? "bg-white text-[var(--brand)]" : "bg-white/12 text-white",
+                          ].join(" ")}
                         >
-                          <span
-                            aria-hidden
-                            className="grid size-9 shrink-0 place-items-center rounded-full bg-white/12 text-[0.6875rem] font-semibold text-white"
-                          >
-                            {/* Skip separators, or "Therapist / provider"
-                                initialises to "T/". */}
-                            {definition.label
-                              .split(/[\s/]+/)
-                              .filter((part) => /[a-z]/i.test(part))
-                              .map((part) => part[0]!.toUpperCase())
-                              .slice(0, 2)
-                              .join("")}
-                          </span>
+                          {/* Skip separators, or "Therapist / provider"
+                              initialises to "T/". */}
+                          {definition.label
+                            .split(/[\s/]+/)
+                            .filter((part) => /[a-z]/i.test(part))
+                            .map((part) => part[0]!.toUpperCase())
+                            .slice(0, 2)
+                            .join("")}
+                        </span>
 
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-medium text-white">
-                              {definition.label}
-                            </span>
-                            <span className="block truncate text-xs text-white/65">
-                              {definition.summary}
-                            </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-white">
+                            {definition.label}
                           </span>
-
-                          <span className="hidden shrink-0 text-[0.6875rem] text-white/50 sm:block">
-                            {definition.permissions.length}{" "}
-                            {definition.permissions.length === 1
-                              ? "permission"
-                              : "permissions"}
+                          <span className="block truncate text-xs text-white/65">
+                            {definition.summary}
                           </span>
+                        </span>
 
-                          <IconArrowUpRight className="size-4 shrink-0 text-white/40 transition-colors group-hover:text-white" />
-                        </button>
-                      </form>
+                        <span className="hidden shrink-0 text-[0.6875rem] text-white/50 sm:block">
+                          {definition.permissions.length}{" "}
+                          {definition.permissions.length === 1
+                            ? "permission"
+                            : "permissions"}
+                        </span>
+
+                        <span
+                          aria-hidden
+                          className={[
+                            "grid size-5 shrink-0 place-items-center rounded-full border text-[0.625rem]",
+                            active
+                              ? "border-white bg-white text-[var(--brand)]"
+                              : "border-white/30 text-transparent",
+                          ].join(" ")}
+                        >
+                          ✓
+                        </span>
+                      </Link>
                     </li>
                   );
                 })}
               </ul>
+
+              <p className="mt-3 px-3 text-xs text-white/55">
+                Selected: {ROLE_DEFINITIONS[selected].label}. Sign in on the
+                {" "}
+                <a href="#sign-in" className="underline underline-offset-4">
+                  form
+                </a>{" "}
+                to continue as them.
+              </p>
             </div>
 
             <div className="mt-8 flex flex-wrap gap-x-8 gap-y-4 border-t border-white/15 pt-6">
@@ -166,7 +199,7 @@ export default async function LoginPage({
 
           <div className="flex flex-1 flex-col justify-center py-10">
             <div className="mx-auto w-full max-w-sm">
-              <h1 className="text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
+              <h1 id="sign-in" className="scroll-mt-8 text-2xl font-semibold tracking-tight text-[var(--ink-primary)]">
                 Sign in
               </h1>
               <p className="mt-1.5 text-sm text-[var(--ink-secondary)]">

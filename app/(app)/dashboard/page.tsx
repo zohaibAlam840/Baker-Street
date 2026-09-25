@@ -14,6 +14,7 @@ import {
   IconStethoscope,
   IconUsers,
 } from "@/components/shell/icons";
+import { OversightOverview } from "@/components/dashboard/OversightOverview";
 import { can } from "@/lib/auth/roles";
 import { ROLE_DEFINITIONS } from "@/lib/auth/roles";
 import { requireSession } from "@/lib/auth/session";
@@ -35,6 +36,26 @@ export default async function DashboardPage({
   const definition = ROLE_DEFINITIONS[session.role];
   const { week, clinician } = await searchParams;
   const { ctx } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
+
+  // A role that cannot see a schedule has no business being shown one. The
+  // compliance officer holds `audit.read` and nothing else, and was landing
+  // on the full clinical dashboard — patient demographics included.
+  if (
+    !can(session.role, "view.patient_schedule") &&
+    !can(session.role, "view.provider_schedule")
+  ) {
+    return (
+      <OversightOverview
+        roleLabel={definition.label}
+        weekStart={ctx.grid.startDate}
+        appointments={ctx.appointments.length}
+        services={[...ctx.services.values()].filter((s) => s.active).length}
+        locations={ctx.locations.size}
+        overrides={0}
+        auditEntries={0}
+      />
+    );
+  }
 
   const today = demoToday();
   const todayDate = formatDateOnly(today, ctx.grid.timeZone);
@@ -188,7 +209,13 @@ export default async function DashboardPage({
     });
 
   // ------------------------------------------------------------ demographics
-  const bands = ageBands(patients);
+  // A therapist sees the age spread of *their* patients. The practice-wide
+  // figure was still here after the other scoping fixes: a clinician with one
+  // patient this week was being shown all 20.
+  const cohortIds = new Set(visible.map((a) => a.patient_id));
+  const cohort = scoped ? patients.filter((p) => cohortIds.has(p.id)) : patients;
+  const cohortActive = cohort.filter((p) => p.status === "ACTIVE").length;
+  const bands = ageBands(cohort);
   const biggest = bands.reduce(
     (best, band, index) => (band.count > bands[best].count ? index : best),
     0,
@@ -588,9 +615,9 @@ export default async function DashboardPage({
               </h2>
               <p className="mt-1 text-xs text-[var(--ink-secondary)]">
                 <span className="text-lg font-semibold text-[var(--ink-primary)]">
-                  {patients.length}
+                  {cohort.length}
                 </span>{" "}
-                total patients · {activePatients} active
+                {scoped ? "of your patients" : "total patients"} · {cohortActive} active
               </p>
             </div>
             <Link
@@ -609,7 +636,7 @@ export default async function DashboardPage({
                 label: band.label,
                 caption: "Patients",
                 value: band.count,
-                share: (band.count / Math.max(patients.length, 1)) * 100,
+                share: (band.count / Math.max(cohort.length, 1)) * 100,
               }))}
             />
           </div>
