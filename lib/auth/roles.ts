@@ -232,6 +232,7 @@ export interface NavItem {
   requires: readonly Permission[];
   description: string;
   icon:
+    | "search"
     | "dashboard"
     | "calendar"
     | "users"
@@ -260,6 +261,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     requires: ["view.patient_schedule", "view.provider_schedule"],
     description: "Patient and provider weeks",
     icon: "calendar",
+  },
+  {
+    href: "/search",
+    label: "Search",
+    short: "Search",
+    requires: ["view.patient_schedule"],
+    description: "Patients, clinicians and appointments",
+    icon: "search",
   },
   {
     href: "/patients",

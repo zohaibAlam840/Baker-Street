@@ -176,6 +176,7 @@ export const ICONS = {
   shield: IconShield,
   clipboard: IconClipboard,
   chart: IconChart,
+  search: IconSearch,
   settings: IconSettings,
   more: IconMore,
 } as const;

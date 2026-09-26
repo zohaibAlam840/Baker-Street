@@ -231,3 +231,71 @@ Two, both on the dashboard:
 
 The pattern in both: least privilege has to hold on the landing screen, not
 only on the pages behind a permission check.
+
+## Email and notifications: what actually exists
+
+Asked to verify these, the honest finding is that **neither had been built**,
+and neither appears in the specification.
+
+Evidence:
+
+- No mail library is installed and no mail code exists. `package.json` lists
+  five runtime dependencies: `next`, `react`, `react-dom`,
+  `@supabase/supabase-js`, and Tailwind. A search for `resend`, `nodemailer`,
+  `sendgrid`, `postmark`, `mailgun`, `smtp`, `sendMail` and `@react-email`
+  across the repo returns nothing.
+- The 78-section specification contains **zero** occurrences of "notification",
+  "email", "mail", "SMS", "remind", "alert" or "message". (Sanity check on the
+  same extraction: "authorization" 57, "ABA" 99, "solver" 24 — the text was
+  read correctly.)
+- The bell in the top bar was `<button type="button">` with no handler, and
+  the search box beside it was an `<input>` with no form and no `name`. Both
+  looked interactive on every screen and did nothing.
+
+**No test email was sent.** There is no provider account, no API key and no
+verified sender domain, so there is nothing to send with — and a message
+claiming otherwise would be worse than the gap.
+
+### To add email later
+
+1. An account with a provider (Resend, Postmark, SES).
+2. A verified sending domain with SPF, DKIM and DMARC — mail from an
+   unverified domain lands in spam.
+3. **A signed business associate agreement**, and a rule that appointment
+   details never appear in the body. A reminder saying "you have an
+   appointment on Tuesday" is fine; one naming the service is a disclosure.
+4. An unsubscribe path and a record of consent per recipient.
+
+### What was built instead
+
+The bell now works, from data the engine already holds:
+
+- **Lapsed or expiring credentials** — the one condition that makes a *booked*
+  appointment illegal, so it sorts first.
+- **Authorizations running out**, and funded hours nobody has scheduled.
+- **Patients below their clinical minimum** — a clinical floor, not a payer
+  figure.
+- **Appointments with no clinician.**
+
+Nothing is stored, queued or pushed. Alerts are computed from the current
+snapshot each time the panel opens, so they cannot go stale and there is no
+queue to fall out of sync.
+
+Two decisions worth noting:
+
+- **Grouping runs after scoping, never before.** Every ABA authorization in
+  the demo clinic ends on the same date, which produced sixteen near-identical
+  rows; they now collapse into one. But a therapist who can see one of those
+  patients gets that patient *by name* — collapsing first would have hidden a
+  name behind a count of people who are none of their business.
+- **The badge only counts things that are actually wrong.** Padding it with
+  read receipts is how people learn to ignore a notification light.
+
+### The search box searches
+
+`/search` covers patients, clinicians and appointments — the three its
+placeholder had been promising — scoped so a therapist finds their own
+patients and themselves and nobody else. It reads the same snapshot every
+other screen does, so there is no index to fall out of date. It is also in the
+nav, because the top-bar box is desktop-only and a phone had no way to reach
+it.

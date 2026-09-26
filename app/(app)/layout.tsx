@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 
 import { AssistantWidget } from "@/components/shell/AssistantWidget";
 import { BottomNav, SidebarNav } from "@/components/shell/Nav";
+import { NotificationsMenu } from "@/components/shell/NotificationsMenu";
 import {
   IconArrowUpRight,
-  IconBell,
   IconChart,
   IconLogo,
   IconSearch,
@@ -15,7 +15,10 @@ import { signOut } from "@/lib/auth/actions";
 import { ROLE_DEFINITIONS, can, navFor, primaryNavFor } from "@/lib/auth/roles";
 import { requireSession } from "@/lib/auth/session";
 import { EXAMPLE_REQUESTS } from "@/lib/ai/interpret";
-import { demoToday } from "@/lib/scheduling/defaults";
+import { loadHorizon } from "@/lib/data/snapshot";
+import { formatDateOnly } from "@/lib/domain/time";
+import { buildAlerts, groupAlerts, scopeAlerts } from "@/lib/scheduling/alerts";
+import { defaultWeekStart, demoToday } from "@/lib/scheduling/defaults";
 
 /**
  * The signed-in shell.
@@ -32,6 +35,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const primary = primaryNavFor(session.role);
 
   const today = demoToday();
+
+  // The bell used to be a button with no handler. These are derived from
+  // the current snapshot on each request, then narrowed to what this role
+  // may see — the same scoping the dashboard uses.
+  const { ctx } = await loadHorizon({ startDate: defaultWeekStart() });
+  const alerts = groupAlerts(
+    scopeAlerts(
+    buildAlerts(ctx, formatDateOnly(today, ctx.grid.timeZone)),
+    ctx,
+    session.providerId,
+      definition.scope === "own" || definition.scope === "caseload",
+    ),
+  );
   const dateLabel = today.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
@@ -109,27 +125,25 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               </Link>
 
               {can(session.role, "view.patient_schedule") ? (
-              <label className="relative hidden min-w-0 flex-1 items-center lg:flex">
+              <form action="/search" className="relative hidden min-w-0 flex-1 items-center lg:flex">
                 <IconSearch className="pointer-events-none absolute left-3.5 size-4 text-[var(--ink-muted)]" />
-                <span className="sr-only">Search patients, clinicians, appointments</span>
+                <label htmlFor="global-search" className="sr-only">
+                  Search patients, clinicians and appointments
+                </label>
                 <input
+                  id="global-search"
                   type="search"
+                  name="q"
                   placeholder="Search patients, clinicians, appointments"
                   className="h-10 w-full rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] pl-10 pr-4 text-sm text-[var(--ink-primary)] outline-none placeholder:text-[var(--ink-muted)] focus:ring-2 focus:ring-[var(--brand-ring)]"
                 />
-              </label>
+              </form>
               ) : (
                 <span className="hidden flex-1 lg:block" />
               )}
 
               <div className="ml-auto flex items-center gap-2">
-                <button
-                  type="button"
-                  aria-label="Notifications"
-                  className="grid size-10 place-items-center rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] text-[var(--ink-secondary)]"
-                >
-                  <IconBell className="size-[18px]" />
-                </button>
+                <NotificationsMenu alerts={alerts} />
 
                 {can(session.role, "view.patient_schedule") && (
                 <Link
