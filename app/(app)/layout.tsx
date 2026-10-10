@@ -55,10 +55,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   });
 
   return (
-    <div className="min-h-dvh bg-[var(--surface-page)] lg:p-4">
-      <div className="mx-auto flex min-h-dvh max-w-[96rem] overflow-hidden bg-[var(--surface-app)] lg:min-h-[calc(100dvh-2rem)] lg:rounded-[1.75rem] lg:shadow-[var(--shadow-float)]">
+    <div className="min-h-dvh bg-[var(--surface-app)]">
+      <div className="flex min-h-dvh w-full">
         {/* ---------------- Sidebar (desktop) ---------------- */}
-        <aside className="hidden w-[16.5rem] shrink-0 flex-col gap-4 p-4 lg:flex">
+        <aside className="hidden w-[16.5rem] shrink-0 flex-col gap-4 border-r border-[var(--rule-hairline)] p-4 lg:flex">
           <div className="flex items-center gap-2 px-2 py-1">
             <IconLogo className="size-7 text-[var(--brand)]" />
             <span className="text-[0.95rem] font-semibold tracking-tight text-[var(--ink-primary)]">
@@ -66,7 +66,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </span>
           </div>
 
-          <div className="card flex-1 overflow-y-auto p-2">
+          <div className="flex-1 overflow-y-auto">
             <SidebarNav items={nav} />
           </div>
 

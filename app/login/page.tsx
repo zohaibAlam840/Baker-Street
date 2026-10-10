@@ -40,8 +40,8 @@ export default async function LoginPage({
     role && (ROLES as readonly string[]).includes(role) ? (role as Role) : "SCHEDULER";
 
   return (
-    <div className="min-h-dvh bg-[var(--surface-page)] lg:p-4">
-      <div className="mx-auto grid min-h-dvh max-w-[90rem] overflow-hidden bg-[var(--surface-1)] lg:min-h-[calc(100dvh-2rem)] lg:grid-cols-[1.05fr_1fr] lg:rounded-[1.75rem] lg:shadow-[var(--shadow-float)]">
+    <div className="min-h-dvh bg-[var(--surface-1)]">
+      <div className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
         {/* --------------------- left: what this is, and the roles --------------------- */}
         <div
           className="relative order-2 overflow-hidden px-6 py-10 sm:px-10 lg:order-1 lg:px-12 lg:py-12"
