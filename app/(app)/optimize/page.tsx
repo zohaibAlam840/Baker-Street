@@ -28,6 +28,7 @@ export default async function OptimizePage({
 
   const { ctx, synthetic } = await loadHorizon({
     startDate: params.week ?? defaultWeekStart(),
+    includeOpaqueBusy: true,
   });
 
   const patients = [...ctx.patients.values()].sort((a, b) =>
@@ -163,16 +164,16 @@ export default async function OptimizePage({
               detail={
                 analysis.exact
                   ? "No arrangement can do better"
-                  : `Up to ${analysis.upper_bound_additional_hours}h might fit with a solver`
+                  : `Up to ${analysis.upper_bound_additional_hours}h may fit; compare complete plans`
               }
             />
           </div>
 
-          {/* Being explicit that this is analysis, not optimisation. */}
+          {/* This focused analysis is separate from whole-week plan optimization. */}
           <p className="text-xs text-[var(--ink-secondary)]">
             {analysis.exact
               ? "Greedy placement matched the theoretical maximum, so this is provably the best available answer."
-              : "Greedy placement found less than the theoretical maximum. A solver may find a better arrangement; the gap is listed below."}
+              : "Greedy placement found less than the theoretical maximum. The bounded multi-service optimizer may find a better arrangement; the gap is listed below."}
           </p>
 
           {analysis.proposed.length > 0 && (
@@ -225,8 +226,9 @@ export default async function OptimizePage({
                 </table>
               </div>
               <p className="text-xs text-[var(--ink-secondary)]">
-                Nothing is booked. Phase 1 is read-only — approving and
-                committing changes is built alongside the solver.
+                These focused placements are not booked from this screen. Use
+                Plan optimizer to compare complete multi-service plans; approval
+                reloads live data and commits the selected plan atomically.
               </p>
             </section>
           )}

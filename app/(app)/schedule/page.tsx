@@ -227,7 +227,7 @@ export default async function SchedulePage({
                         </span>
                       </span>
 
-                      <span className="hidden shrink-0 items-center gap-1.5 sm:flex">
+                      <span className="flex shrink-0 items-center gap-1.5">
                         <Badges row={row} />
                         <Link href={`/appointments/${row.id}?week=${weekStart}`} className="ml-2 text-xs underline underline-offset-4">Details</Link>
                       </span>

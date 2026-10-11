@@ -22,6 +22,8 @@ import { loadHorizon } from "@/lib/data/snapshot";
 import { SLOTS_PER_DAY, SLOT_MINUTES, slotsToHours, subtractRanges } from "@/lib/domain/slots";
 import { formatClockTime, formatDateOnly } from "@/lib/domain/time";
 import { defaultWeekStart, demoToday } from "@/lib/scheduling/defaults";
+import { addDays } from "@/lib/domain/time";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,7 @@ export default async function DashboardPage({
   const session = await requireSession();
   const definition = ROLE_DEFINITIONS[session.role];
   const { week, clinician } = await searchParams;
-  const { ctx } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
+  const weekStart = week ?? defaultWeekStart();
 
   // A role that cannot see a schedule has no business being shown one. The
   // compliance officer holds `audit.read` and nothing else, and was landing
@@ -44,18 +46,32 @@ export default async function DashboardPage({
     !can(session.role, "view.patient_schedule") &&
     !can(session.role, "view.provider_schedule")
   ) {
+    const supabase = await createClient();
+    const { data } = await supabase.rpc("oversight_metrics", {
+      p_date_start: weekStart,
+      p_date_end: addDays(weekStart, 6),
+    });
+    const metrics = (data ?? {}) as {
+      appointments?: number;
+      services?: number;
+      locations?: number;
+      overrides?: number;
+      audit_entries?: number;
+    };
     return (
       <OversightOverview
         roleLabel={definition.label}
-        weekStart={ctx.grid.startDate}
-        appointments={ctx.appointments.length}
-        services={[...ctx.services.values()].filter((s) => s.active).length}
-        locations={ctx.locations.size}
-        overrides={0}
-        auditEntries={0}
+        weekStart={weekStart}
+        appointments={metrics.appointments ?? 0}
+        services={metrics.services ?? 0}
+        locations={metrics.locations ?? 0}
+        overrides={metrics.overrides ?? 0}
+        auditEntries={metrics.audit_entries ?? 0}
       />
     );
   }
+
+  const { ctx } = await loadHorizon({ startDate: weekStart });
 
   const today = demoToday();
   const todayDate = formatDateOnly(today, ctx.grid.timeZone);

@@ -4,9 +4,10 @@
  * Answers "how close can this patient get to N hours of a service this week,
  * and what is stopping them?" — generically, with ABA as the first caller.
  *
- * WHAT THIS IS NOT: an optimizer. Choosing the best combination of candidates
- * is a packing problem and belongs to CP-SAT (Phase 2). What this module does
- * instead is bracket the answer honestly:
+ * WHAT THIS IS NOT: the multi-service plan optimizer. This focused helper
+ * deliberately brackets one service with a greedy lower bound and a theoretical
+ * upper bound; `optimizePatientWeek()` handles bounded deterministic plan
+ * selection across all configured service goals.
  *
  *   upper_bound   the most that COULD be scheduled if packing were perfect —
  *                 the overlap between the patient's free time and any eligible
@@ -291,7 +292,13 @@ function greedyFill(
 
       placed.push(candidate);
       hours += candidateHours;
-      working = working.withExtraAppointments([candidateToAppointment(candidate, working)]);
+      working = working.withExtraAppointments(
+        [candidateToAppointment(candidate, working)],
+        candidate.resource_ids.map((resource_id) => ({
+          appointment_id: candidate.candidate_id,
+          resource_id,
+        })),
+      );
       progress = true;
       break; // re-sort intent: restart the scan against the updated context
     }
@@ -399,11 +406,13 @@ function explainShortfall(input: {
     });
   }
 
-  // The bounds disagree: perfect packing beats greedy, so a solver might do better.
+  // The bounds disagree: whole-week bounded search may improve on this greedy
+  // result, while proving the exact packing optimum still requires exhaustive
+  // search or a constraint solver.
   if (upperBound > achievable + 1e-9) {
     factors.push({
       code: "PACKING_GAP",
-      message: `A better arrangement may exist: up to ${round(upperBound)}h could fit, greedy placement found ${round(achievable)}h. Resolving this exactly needs the solver.`,
+      message: `A better arrangement may exist: up to ${round(upperBound)}h could fit, greedy placement found ${round(achievable)}h. Compare complete plans in the multi-service optimizer.`,
       hours: round(upperBound - achievable),
     });
   }

@@ -56,7 +56,10 @@ export async function POST(request: NextRequest) {
       ? body.week
       : defaultWeekStart();
 
-  const { ctx, synthetic } = await loadHorizon({ startDate: week });
+  const { ctx, synthetic } = await loadHorizon({
+    startDate: week,
+    includeOpaqueBusy: true,
+  });
   const understood = interpret(question, ctx);
   const answer = answerQuestion(ctx, understood);
 

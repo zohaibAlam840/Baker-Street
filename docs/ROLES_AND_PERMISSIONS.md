@@ -1,6 +1,7 @@
-# Users, roles and permissions — proposal v1
+# Users, roles and permissions
 
-**Status: our proposal, for Baker Street to confirm or correct.**
+**Status: implemented baseline; Baker Street must confirm the operating model
+before production use.**
 
 The handoff specification requires "role-based access control" (§64) and
 "human approval" of every schedule change (§60), but never says who those
@@ -8,11 +9,10 @@ humans are. It records that users exist — `optimization_requests.requested_by`
 `audit_log.user_id`, a concurrency test for "two users attempting the same
 appointment" (§68) — without defining a single role.
 
-So this document proposes the model. Nothing here is quoted from the spec;
-everything is derived from the operations the system actually performs, then
-assigned to the person who would realistically perform each one in a
-multi-service clinic. **Open questions for the client are collected at the
-end** — those are the answers we need before building the login system.
+This document records the implemented model. The role assignments are derived
+from the operations the system performs rather than quoted from the spec.
+**Open questions for the client are collected at the end**; those answers are
+required to validate the production policy, not to describe missing login code.
 
 ---
 
@@ -200,6 +200,12 @@ target, or drops a required service**, needs `CLINICAL` approval.
 This is the approval threshold behind note 4. It is a clinical safety line, and
 it is cheap to implement now and painful to retrofit.
 
+The current multi-service optimizer only adds visits and marks any diagnostic
+plan that fails a required clinical minimum as non-approvable. Both Scheduler
+and Clinical roles can approve these additive plans. If plan search later gains
+the ability to move or remove existing care, the database transaction must also
+enforce `schedule.approve_reduction`; a hidden or disabled button is not enough.
+
 ### 3. Every override carries a reason, and the reason is permanent
 
 `audit_log.override_reason` already exists in the schema. No override should be
@@ -246,7 +252,7 @@ load. So:
 
 Grouped by how much they change the build.
 
-**Blocking — cannot build the login system without these:**
+**Blocking for production policy sign-off:**
 
 1. Do these seven roles match how Baker Street actually works, or are some of
    them the same person? (Small clinics often merge scheduler + authorization.)
@@ -262,7 +268,7 @@ Grouped by how much they change the build.
 5. Do parents or guardians ever log in? Out of scope as proposed.
 6. Real patient and staff numbers, to confirm or replace the estimate above.
 
-**Needed before real patient data, not before building:**
+**Needed before production PHI:**
 
 7. Who is the named privacy/compliance officer?
 8. Is there an existing identity provider (Microsoft 365, Google Workspace,
@@ -274,26 +280,29 @@ Grouped by how much they change the build.
 
 ## What this means for implementation
 
-Nothing is built yet — **the application currently has no authentication at
-all.** That is acceptable while it runs on synthetic data and unacceptable the
-moment real patient information appears.
+Security is enforced in layers:
 
-When we do build it, in order:
+1. **Authentication.** Supabase Auth owns sign-in, sign-up, callback, sign-out,
+   and password reset. A valid Auth identity alone is insufficient: the linked
+   `user_profiles` row must also be active.
+2. **Role assignment.** The approved role is stored in `user_profiles`; users
+   cannot choose or change it for themselves. New accounts remain pending until
+   an administrator completes that profile.
+3. **Database scope.** Postgres RLS enforces the seven roles. Provider accounts
+   are linked to provider rows, and clinical access follows active care-team
+   assignments. Application navigation mirrors these permissions but is not
+   the security boundary.
+4. **Atomic approval.** A permitted approver supplies a reason. The server
+   reloads current RLS-scoped data and recomputes the stable plan ID; the
+   database locks/revalidates live constraints and commits appointments,
+   resources, optimization history, and audit history together.
+5. **Permanent accountability.** Domain and appointment changes create audit
+   entries, and approval retries use a unique idempotency key so one decision
+   cannot create duplicate visits.
 
-1. **Authentication** — ideally the client's existing identity provider
-   (question 8), not passwords we manage.
-2. **Role assignment**, one role per user to start. Multi-role users are a
-   complication to add only if the client says the same person genuinely wears
-   two hats.
-3. **Row-level security in Postgres**, not just checks in the application.
-   A therapist restricted to their own caseload should be restricted *at the
-   database*, so a bug in a query cannot leak another patient's record.
-4. **The approval threshold** (rule 2) — a check in the approval transaction
-   that already exists in §63's flow.
-5. **Append-only audit log**, with overrides required to carry a reason.
-
-Steps 1–3 are the gate for real PHI. They sit alongside the Supabase paid plan
-and the signed business associate agreement, not after them.
+These controls still sit alongside a paid eligible database plan, a signed
+business associate agreement, approved logging/retention, backup drills, and a
+completed production security review.
 
 ---
 
@@ -305,12 +314,17 @@ The role model above is now live in the application.
   navigation map. **Single source of truth.** A screen that checks a role name
   directly (`if role === "ADMIN"`) will drift the moment the client corrects
   the model; screens ask `can(role, permission)` instead.
-- `lib/auth/session.ts` — **demo sessions only. This is not authentication.**
-  A role name in a cookie, no password, nothing verified.
+- `lib/auth/session.ts` — resolves Supabase Auth claims and requires an active
+  database profile with a valid role and optional provider link.
 - `app/(app)/layout.tsx` — navigation built from the signed-in role's
   permissions.
 - `app/no-access/page.tsx` — where a failed permission check lands: it names
   the role held, says what that role is for, and lists where the user can go.
+- `supabase/migrations/20261011030400_care_teams_and_role_rls.sql` and the
+  hardening migration — provider links, care teams, and minimum-necessary RLS.
+- `lib/scheduling/actions.ts` and
+  `20261011030900_optimizer_approval.sql` — stale-plan recomputation,
+  idempotency, transactional approval, and linked audit history.
 
 Verified access matrix (`OK` = page renders, `blocked` = redirected):
 
@@ -327,17 +341,22 @@ Verified access matrix (`OK` = page renders, `blocked` = redirected):
 Administrators having no schedule access is deliberate, not an oversight — see
 separation rule 1.
 
-**Data scoping is enforced, not just hidden.** Signed in as a therapist, the
-schedule index lists only that clinician and only the patients they actually
-see. That is currently a filter in the query; it must also become Postgres
-row-level security before real patient data, so a bug in one query cannot leak
-another patient's record.
+**Data scoping is enforced, not just hidden.** A provider sees their own staff
+record and assigned patients. A clinical supervisor sees active care-team
+patients. Ordinary page reads carry the authenticated user's cookies and are
+filtered by Postgres RLS; they do not use the service-role key. The optimizer
+can also receive PHI-minimal busy intervals for unrelated appointments so it
+avoids collisions without disclosing another caseload.
 
-### Still to build
+### Still to decide or extend
 
-1. Real authentication, replacing the cookie switcher entirely.
-2. Roles read from the database rather than chosen from a menu.
-3. Row-level security in Postgres.
-4. The approval threshold (separation rule 2) inside the commit transaction.
-5. Write access — every screen is currently read-only, so no audit entries
-   exist yet.
+1. Client confirmation of the seven role definitions, scope boundaries, and
+   whether staff need more than one role.
+2. Whether Supabase email/password remains the production identity system or
+   is replaced by the practice's SSO provider.
+3. A visible reject/defer workflow; the permission exists, while the current
+   Plan optimizer exposes approval only.
+4. Clinical reduction approval before any future optimizer is allowed to move
+   or remove existing care.
+5. Final production RLS/approval penetration tests, operational ownership, and
+   healthcare compliance sign-off.

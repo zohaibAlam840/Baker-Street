@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { can, type Permission } from "@/lib/auth/roles";
 import { requireSession } from "@/lib/auth/session";
+import { loadHorizon } from "@/lib/data/snapshot";
+import { addDays, parseZonedDateTimeLocal, startOfWeek } from "@/lib/domain/time";
+import type { CandidateAppointment } from "@/lib/domain/types";
+import { evaluateBooking } from "@/lib/rules/engine";
+import { FlatTravelModel } from "@/lib/rules/travel";
+import { candidateToAppointment, resourceChoicesFor } from "@/lib/scheduling/candidates";
 import { createClient } from "@/lib/supabase/server";
 
 const value = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
@@ -33,40 +39,154 @@ function explainDatabaseError(message: string) {
 export async function createAppointment(form: FormData) {
   const { session, supabase } = await authorized("schedule.book");
   const returnPath = "/appointments/new";
-  const start = new Date(value(form, "start_time"));
+  const patientId = value(form, "patient_id");
+  const serviceId = value(form, "service_id");
+  const providerId = value(form, "provider_id");
+  const { data: patient } = await supabase
+    .from("patients")
+    .select("timezone")
+    .eq("id", patientId)
+    .single();
+  const timeZone = patient?.timezone ?? process.env.SCHEDULING_TIMEZONE ?? "America/New_York";
+  const localStart = value(form, "start_time");
+  const parsedStart = parseZonedDateTimeLocal(localStart, timeZone);
   const duration = Number(value(form, "duration_minutes"));
   const repeats = Math.min(52, Math.max(1, Number(value(form, "repeat_count") || 1)));
-  if (!Number.isFinite(start.getTime()) || !Number.isInteger(duration) || duration < 15 || duration % 15 !== 0) fail(returnPath, "Choose a valid start time and a duration in 15-minute increments.");
+  if (!parsedStart || !Number.isInteger(duration) || duration < 15 || duration % 15 !== 0) fail(returnPath, "Choose a valid clinic-local start time and a duration in 15-minute increments.");
+  const start = parsedStart ?? fail(returnPath, "Choose a valid start time.");
   const recurrence = repeats > 1 ? crypto.randomUUID() : null;
   const base = {
-    patient_id: value(form, "patient_id"), service_id: value(form, "service_id"),
-    provider_id: nullable(form, "provider_id"), location_id: nullable(form, "location_id"),
+    patient_id: patientId, service_id: serviceId,
+    provider_id: providerId, location_id: nullable(form, "location_id"),
     authorization_id: nullable(form, "authorization_id"), telehealth: checked(form, "telehealth"),
     scheduling_flexibility: value(form, "scheduling_flexibility") || "FLEXIBLE",
     status: "SCHEDULED", notes: nullable(form, "notes"), recurrence_group_id: recurrence,
     created_by: session.userId,
   };
   if (!base.patient_id || !base.service_id || !base.provider_id) fail(returnPath, "Patient, service, and clinician are required.");
-  const rows = Array.from({ length: repeats }, (_, index) => {
-    const occurrenceStart = new Date(start); occurrenceStart.setUTCDate(occurrenceStart.getUTCDate() + index * 7);
-    return { ...base, start_time: occurrenceStart.toISOString(), end_time: new Date(occurrenceStart.getTime() + duration * 60_000).toISOString() };
+  const weekStart = startOfWeek(start, timeZone);
+  const { ctx } = await loadHorizon({
+    startDate: weekStart,
+    dayCount: repeats * 7,
+    timeZone,
+    includeOpaqueBusy: true,
   });
-  const { data, error } = await supabase.from("appointments").insert(rows).select("id");
+  const travel = new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true });
+  const [localDate, localClock] = localStart.split("T");
+  const rows: (typeof base & { start_time: string; end_time: string })[] = [];
+  const resourcesByRow: string[][] = [];
+  let working = ctx;
+  for (let index = 0; index < repeats; index += 1) {
+    const parsedOccurrenceStart = parseZonedDateTimeLocal(
+      `${addDays(localDate, index * 7)}T${localClock}`,
+      timeZone,
+    );
+    const occurrenceStart = parsedOccurrenceStart ?? fail(returnPath, "A recurring date lands on a clock time that does not exist because of daylight saving time.");
+    const occurrenceEnd = new Date(occurrenceStart.getTime() + duration * 60_000);
+    const range = working.grid.rangeOf(occurrenceStart, occurrenceEnd) ?? fail(returnPath, "An occurrence falls outside the scheduling horizon.");
+    const resourceChoices = resourceChoicesFor(
+      working,
+      serviceId,
+      base.location_id,
+      base.telehealth,
+    );
+    let chosenResources: string[] | null = null;
+    for (const resourceIds of resourceChoices) {
+      const proof = evaluateBooking({
+        patient_id: patientId,
+        service_id: serviceId,
+        provider_id: providerId,
+        location_id: base.location_id,
+        authorization_id: base.authorization_id,
+        resource_ids: resourceIds,
+        range,
+        telehealth: base.telehealth,
+      }, working, { travel, includeSoft: false });
+      if (proof.valid) { chosenResources = resourceIds; break; }
+      if (resourceIds === resourceChoices.at(-1)) {
+        fail(returnPath, proof.violations.find((item) => item.severity === "HARD")?.message ?? "The appointment is no longer legal.");
+      }
+    }
+    chosenResources ??= [];
+    const temporaryId = `manual:${crypto.randomUUID()}`;
+    const candidate: CandidateAppointment = {
+      candidate_id: temporaryId,
+      patient_id: patientId,
+      service_id: serviceId,
+      provider_id: providerId,
+      authorization_id: base.authorization_id,
+      start_slot: range.startSlot,
+      end_slot: range.endSlot,
+      duration_slots: range.endSlot-range.startSlot,
+      location_id: base.location_id,
+      resource_ids: chosenResources,
+      is_existing: false,
+      flexibility: base.scheduling_flexibility as CandidateAppointment["flexibility"],
+      service_priority: 100,
+      required_service: false,
+      target_service: false,
+      objective_values: {},
+    };
+    working = working.withExtraAppointments(
+      [candidateToAppointment(candidate, working)],
+      chosenResources.map((resource_id) => ({ appointment_id: temporaryId, resource_id })),
+    );
+    rows.push({ ...base, start_time: occurrenceStart.toISOString(), end_time: occurrenceEnd.toISOString() });
+    resourcesByRow.push(chosenResources);
+  }
+  const { data, error } = await supabase.rpc("create_appointment_series", {
+    p_items: rows.map((row, index) => ({ ...row, resource_ids: resourcesByRow[index] })),
+    p_reason: repeats > 1 ? "Recurring series booked" : "Appointment booked",
+  });
   if (error) fail(returnPath, explainDatabaseError(error.message));
+  const appointmentIds = (data as { appointment_ids?: string[] } | null)?.appointment_ids ?? [];
+  if (appointmentIds.length !== rows.length) {
+    fail(returnPath, "The booking transaction did not return every appointment. No partial series was accepted.");
+  }
   revalidatePath("/schedule"); revalidatePath("/dashboard");
-  done(`/appointments/${data![0].id}`, repeats > 1 ? `${repeats} recurring appointments booked.` : "Appointment booked.");
+  done(`/appointments/${appointmentIds[0]}`, repeats > 1 ? `${repeats} recurring appointments booked.` : "Appointment booked.");
 }
 
 export async function updateAppointment(form: FormData) {
   const { supabase } = await authorized("schedule.book");
   const id = value(form, "appointment_id"); const path = `/appointments/${id}`;
-  const start = new Date(value(form, "start_time")); const end = new Date(value(form, "end_time"));
-  if (!id || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) fail(path, "Choose a valid start and end time.");
-  const { error } = await supabase.from("appointments").update({
-    provider_id: nullable(form, "provider_id"), location_id: nullable(form, "location_id"),
-    start_time: start.toISOString(), end_time: end.toISOString(), status: value(form, "status"),
-    scheduling_flexibility: value(form, "scheduling_flexibility"), notes: nullable(form, "reason"),
-  }).eq("id", id);
+  const { data: existing } = await supabase.from("appointments").select("*, patients!inner(timezone)").eq("id",id).single();
+  if (!existing) fail(path,"Appointment no longer exists.");
+  const timeZone = (existing.patients as {timezone?:string}|null)?.timezone ?? process.env.SCHEDULING_TIMEZONE ?? "America/New_York";
+  const parsedStart = parseZonedDateTimeLocal(value(form,"start_time"),timeZone);
+  const parsedEnd = parseZonedDateTimeLocal(value(form,"end_time"),timeZone);
+  const reason=value(form,"reason");
+  if (!id || !parsedStart || !parsedEnd || parsedStart >= parsedEnd) fail(path, "Choose a valid start and end time in the clinic timezone.");
+  const start=parsedStart??fail(path,"Choose a valid start time."); const end=parsedEnd??fail(path,"Choose a valid end time.");
+  if(reason.length<3) fail(path,"Document a reason for this change.");
+  const flexibility=value(form,"scheduling_flexibility");
+  if(existing.scheduling_flexibility==="LOCKED"&&flexibility!=="LOCKED") fail(path,"A locked appointment cannot be unlocked from the edit form.");
+  const week=startOfWeek(start,timeZone); const {ctx}=await loadHorizon({startDate:week,timeZone,includeOpaqueBusy:true}); const range=ctx.grid.rangeOf(start,end)??fail(path,"Appointment falls outside the loaded week.");
+  const {data: resourceLinks,error: resourceError}=await supabase.from("appointment_resources").select("resource_id").eq("appointment_id",id);
+  if(resourceError) fail(path,"The appointment's room assignments could not be checked.");
+  const existingResourceIds=(resourceLinks??[]).map(row=>row.resource_id);
+  const providerId=nullable(form,"provider_id"), locationId=nullable(form,"location_id");
+  const status=value(form,"status");
+  const statusOnlyCompletion=status==="COMPLETED"&&["SCHEDULED","CONFIRMED"].includes(existing.status)
+    &&providerId===existing.provider_id&&locationId===existing.location_id
+    &&start.getTime()===new Date(existing.start_time).getTime()
+    &&end.getTime()===new Date(existing.end_time).getTime()
+    &&flexibility===existing.scheduling_flexibility;
+  let resourceIds:string[]|null=statusOnlyCompletion?existingResourceIds:null;
+  let lastMessage="The change is not legal.";
+  if(!statusOnlyCompletion){
+    for(const choice of resourceChoicesFor(ctx,existing.service_id,locationId,existing.telehealth)){
+      const proof=evaluateBooking({appointment_id:id,patient_id:existing.patient_id,service_id:existing.service_id,provider_id:providerId,location_id:locationId,authorization_id:existing.authorization_id,resource_ids:choice,range,telehealth:existing.telehealth},ctx,{travel:new FlatTravelModel(ctx.locations,{enforceAsHardConstraint:true}),includeSoft:false});
+      if(proof.valid){resourceIds=choice;break;}
+      lastMessage=proof.violations.find(item=>item.severity==="HARD")?.message??lastMessage;
+    }
+  }
+  if(!resourceIds) fail(path,lastMessage);
+  const { error } = await supabase.rpc("update_appointment_booking",{
+    p_appointment_id:id,p_provider_id:providerId,p_location_id:locationId,
+    p_start_time:start.toISOString(),p_end_time:end.toISOString(),p_status:status,
+    p_flexibility:flexibility,p_resource_ids:resourceIds,p_reason:reason,
+  });
   if (error) fail(path, explainDatabaseError(error.message));
   revalidatePath(path); revalidatePath("/schedule"); done(path, "Appointment updated and audited.");
 }

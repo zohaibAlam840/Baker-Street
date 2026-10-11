@@ -49,7 +49,9 @@ export interface RuleOptions {
    * Appointments the caller intends to remove or move in the same operation,
    * so they should not be treated as occupying time.
    */
-  ignoreAppointmentIds?: readonly UUID[];
+  ignoreAppointmentIds?: Iterable<UUID>;
+  /** Candidate enumeration needs only the first hard rejection code. */
+  stopAfterFirstHard?: boolean;
 }
 
 export interface RuleResult {
@@ -61,7 +63,7 @@ type Rule = (
   proposal: ProposedBooking,
   ctx: ScheduleContext,
   opts: Required<Pick<RuleOptions, "travel" | "includeSoft">> & {
-    ignored: Set<UUID>;
+    ignored: ReadonlySet<UUID>;
   },
 ) => Violation[];
 
@@ -418,8 +420,12 @@ const providerCredentials: Rule = (proposal, ctx) => {
   if (credentials.length === 0) return []; // nothing recorded, nothing to enforce
 
   const day = ctx.dateOfSlot(proposal.range.startSlot);
+  const endDay = ctx.dateOfSlot(proposal.range.endSlot - 1);
   const live = credentials.filter(
-    (c) => c.status === "ACTIVE" && (!c.expiration_date || c.expiration_date >= day),
+    (c) =>
+      c.status === "ACTIVE" &&
+      (!c.issue_date || c.issue_date <= day) &&
+      (!c.expiration_date || c.expiration_date >= endDay),
   );
   if (live.length > 0) return [];
 
@@ -451,14 +457,16 @@ const providerCredentials: Rule = (proposal, ctx) => {
 const patientAvailability: Rule = (proposal, ctx) => {
   const windows = ctx.patientAvailableWindows(proposal.patient_id, proposal.service_id);
   const gaps = uncoveredParts(proposal.range, windows);
-  if (gaps.length === 0) return [];
+  if (gaps.length === 0 && ctx.patientAvailabilityCoversRange(proposal.patient_id, proposal.range)) {
+    return [];
+  }
 
   const patient = ctx.patients.get(proposal.patient_id);
   return [
     hard(
       "PATIENT_UNAVAILABLE",
-      `${patient?.first_name ?? "Patient"} is not available ${describeRange(ctx, gaps[0])}.`,
-      { patient_id: proposal.patient_id, range: gaps[0] },
+      `${patient?.first_name ?? "Patient"} is not available ${describeRange(ctx, gaps[0] ?? proposal.range)}.`,
+      { patient_id: proposal.patient_id, range: gaps[0] ?? proposal.range },
     ),
   ];
 };
@@ -466,22 +474,18 @@ const patientAvailability: Rule = (proposal, ctx) => {
 /** Restrictions get their own code so the UI can say "school", not "unavailable". */
 const patientRestrictions: Rule = (proposal, ctx) => {
   const out: Violation[] = [];
-  for (const restriction of ctx.patientRestrictions.get(proposal.patient_id) ?? []) {
-    if (restriction.service_allowed === proposal.service_id) continue;
-    const blocked = ctx.grid.expandWeekly(
-      restriction.day_of_week,
-      parseClockTime(restriction.start_time),
-      parseClockTime(restriction.end_time),
-    );
-    const hit = blocked.find((range) => overlaps(range, proposal.range));
-    if (hit) {
+  for (const { restriction, range } of ctx.patientRestrictionWindows(
+    proposal.patient_id,
+    proposal.service_id,
+  )) {
+    if (overlaps(range, proposal.range)) {
       out.push(
         hard(
           "PATIENT_RESTRICTED",
-          `Blocked by ${restriction.restriction_type.toLowerCase().replace("_", " ")} ${describeRange(ctx, hit)}.`,
+          `Blocked by ${restriction.restriction_type.toLowerCase().replace("_", " ")} ${describeRange(ctx, range)}.`,
           {
             patient_id: proposal.patient_id,
-            range: hit,
+            range,
             detail: { restriction_type: restriction.restriction_type },
           },
         ),
@@ -497,14 +501,18 @@ const providerAvailability: Rule = (proposal, ctx) => {
 
   const windows = ctx.providerClinicalWindows(proposal.provider_id);
   const gaps = uncoveredParts(proposal.range, windows);
-  if (gaps.length === 0) return [];
+  const locations = ctx.providerLocationsForRange(proposal.provider_id, proposal.range);
+  const locationAllowed = proposal.telehealth
+    ? locations.length > 0
+    : locations.includes(proposal.location_id);
+  if (gaps.length === 0 && locationAllowed) return [];
 
   const provider = ctx.providers.get(proposal.provider_id);
   return [
     hard(
       "PROVIDER_UNAVAILABLE",
-      `${provider?.first_name ?? "Provider"} is not available ${describeRange(ctx, gaps[0])}.`,
-      { provider_id: proposal.provider_id, range: gaps[0] },
+      `${provider?.first_name ?? "Provider"} is not available at the selected location ${describeRange(ctx, gaps[0] ?? proposal.range)}.`,
+      { provider_id: proposal.provider_id, range: gaps[0] ?? proposal.range },
     ),
   ];
 };
@@ -575,8 +583,13 @@ const authorization: Rule = (proposal, ctx, opts) => {
     );
   }
 
-  if (auth.authorized_hours != null) {
-    const authorizedSlots = Math.round(auth.authorized_hours * 4);
+  const authorizedHours =
+    auth.authorized_hours ??
+    (auth.authorized_units != null && auth.units_per_hour > 0
+      ? auth.authorized_units / auth.units_per_hour
+      : null);
+  if (authorizedHours != null) {
+    const authorizedSlots = Math.round(authorizedHours * 4);
     let usedSlots = ctx.slotsUsedAgainstAuthorization(auth.id, proposal.appointment_id);
     for (const ignoredId of opts.ignored) {
       const ignored = ctx.appointments.find((a) => a.id === ignoredId);
@@ -590,11 +603,11 @@ const authorization: Rule = (proposal, ctx, opts) => {
       out.push(
         hard(
           "AUTHORIZATION_EXCEEDED",
-          `Would book ${slotsToHours(wouldUse)}h against ${auth.authorized_hours}h authorized (${slotsToHours(Math.max(0, authorizedSlots - usedSlots))}h remaining).`,
+          `Would book ${slotsToHours(wouldUse)}h against ${authorizedHours}h authorized (${slotsToHours(Math.max(0, authorizedSlots - usedSlots))}h remaining).`,
           {
             authorization_id: auth.id,
             detail: {
-              authorized_hours: auth.authorized_hours,
+              authorized_hours: authorizedHours,
               scheduled_hours: slotsToHours(usedSlots),
               remaining_hours: slotsToHours(Math.max(0, authorizedSlots - usedSlots)),
               requested_hours: slotsToHours(durationSlots(proposal.range)),
@@ -738,6 +751,16 @@ const patientPreferences: Rule = (proposal, ctx, opts) => {
  */
 const RULES: Rule[] = [
   withinHorizon,
+  (proposal, ctx) =>
+    ctx.grid.isValidWallClockRange(proposal.range)
+      ? []
+      : [
+          hard(
+            "LOCAL_TIME_INVALID",
+            "This wall-clock time does not exist or is ambiguous because of daylight saving time.",
+            { range: proposal.range },
+          ),
+        ],
   entityState,
   serviceDuration,
   serviceModality,
@@ -771,12 +794,17 @@ export function evaluateBooking(
   const opts = {
     travel: options.travel ?? NO_TRAVEL,
     includeSoft: options.includeSoft ?? false,
-    ignored: new Set(options.ignoreAppointmentIds ?? []),
+    ignored:
+      options.ignoreAppointmentIds instanceof Set
+        ? options.ignoreAppointmentIds
+        : new Set(options.ignoreAppointmentIds ?? []),
   };
 
   const violations: Violation[] = [];
   for (const rule of RULES) {
-    violations.push(...rule(proposal, ctx, opts));
+    const found = rule(proposal, ctx, opts);
+    violations.push(...found);
+    if (options.stopAfterFirstHard && hasHardViolation(found)) break;
   }
 
   return { valid: !hasHardViolation(violations), violations };

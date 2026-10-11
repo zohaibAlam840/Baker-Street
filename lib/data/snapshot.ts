@@ -18,6 +18,8 @@ export interface HorizonRequest {
   timeZone?: string;
   /** Narrow the load to one patient's world. Omit for a whole-clinic view. */
   patientId?: string;
+  /** Add PHI-free busy intervals hidden by caseload RLS for conflict checks. */
+  includeOpaqueBusy?: boolean;
 }
 
 const DEFAULT_TIMEZONE = process.env.SCHEDULING_TIMEZONE ?? "America/New_York";
@@ -99,12 +101,20 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
   ]);
 
   const failed = [
-    patients, services, serviceDurations, serviceResources, providers,
-    providerServices, providerCredentials, providerAvailability,
-    patientAvailability, patientRestrictions, patientPreferences,
-    patientServiceRequirements, authorizations, locations, resources, appointments,
-  ].find((result) => result.error);
-  if (failed?.error) throw new Error(`Snapshot load failed: ${failed.error.message}`);
+    ["patients", patients], ["services", services],
+    ["service_durations", serviceDurations], ["service_resources", serviceResources],
+    ["providers", providers], ["provider_services", providerServices],
+    ["provider_credentials", providerCredentials], ["provider_availability", providerAvailability],
+    ["patient_availability", patientAvailability], ["patient_restrictions", patientRestrictions],
+    ["patient_preferences", patientPreferences],
+    ["patient_service_requirements", patientServiceRequirements],
+    ["authorizations", authorizations], ["locations", locations],
+    ["resources", resources], ["appointments", appointments],
+  ] as const;
+  const failedQuery = failed.find(([, result]) => result.error);
+  if (failedQuery?.[1].error) {
+    throw new Error(`Snapshot load failed for ${failedQuery[0]}: ${failedQuery[1].error.message}`);
+  }
 
   const appointmentIds = (appointments.data ?? []).map((a) => a.id);
   const appointmentResources = appointmentIds.length
@@ -116,6 +126,49 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
   if (appointmentResources.error) {
     throw new Error(`Snapshot load failed: ${appointmentResources.error.message}`);
   }
+
+  type OpaqueBusyRow = {
+    opaque_id: string;
+    service_id: string;
+    provider_id: string | null;
+    location_id: string | null;
+    start_time: string;
+    end_time: string;
+    telehealth: boolean;
+    resource_ids: string[] | null;
+  };
+  const opaqueBusy = request.includeOpaqueBusy
+    ? await supabase.rpc("optimization_busy_intervals", {
+        p_start: windowStart,
+        p_end: windowEnd,
+      })
+    : { data: [] as OpaqueBusyRow[], error: null };
+  if (opaqueBusy.error) {
+    throw new Error(`Snapshot busy-interval load failed: ${opaqueBusy.error.message}`);
+  }
+  const opaqueRows = (opaqueBusy.data ?? []) as OpaqueBusyRow[];
+  const opaqueAppointments: SnapshotRows["appointments"] = opaqueRows.map((row) => ({
+    id: row.opaque_id,
+    patient_id: "00000000-0000-0000-0000-000000000000",
+    service_id: row.service_id,
+    provider_id: row.provider_id,
+    authorization_id: null,
+    location_id: row.location_id,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    status: "SCHEDULED",
+    scheduling_flexibility: "LOCKED",
+    telehealth: row.telehealth,
+    original_start_time: null,
+    original_provider_id: null,
+    original_location_id: null,
+  }));
+  const opaqueResources = opaqueRows.flatMap((row) =>
+    (row.resource_ids ?? []).map((resource_id) => ({
+      appointment_id: row.opaque_id,
+      resource_id,
+    })),
+  );
 
   return {
     patients: patients.data ?? [],
@@ -133,8 +186,8 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
     authorizations: authorizations.data ?? [],
     locations: locations.data ?? [],
     resources: resources.data ?? [],
-    appointments: appointments.data ?? [],
-    appointmentResources: appointmentResources.data ?? [],
+    appointments: [...(appointments.data ?? []), ...opaqueAppointments],
+    appointmentResources: [...(appointmentResources.data ?? []), ...opaqueResources],
   };
 }
 

@@ -4,12 +4,12 @@
  * Generic by design (section 43): the request names a service, and ABA is
  * simply the first caller. Nothing in this route knows what ABA is.
  *
- * Phase 1 caveat, reported in every response: this is capacity ANALYSIS, not
- * optimization. `achievable_additional_hours` comes from a greedy pass and
- * `upper_bound_additional_hours` from the patient/provider overlap. When they
- * agree (`exact: true`) the answer is provably the best available and no
- * solver is needed. When they differ, the gap is reported and the exact answer
- * waits for CP-SAT.
+ * This is non-mutating, single-service capacity ANALYSIS, not the whole-week
+ * optimizer. `achievable_additional_hours` comes from a greedy pass and
+ * `upper_bound_additional_hours` from patient/provider overlap. When they agree
+ * (`exact: true`) the focused answer is exact. When they differ, this endpoint
+ * reports the gap; complete plans come from the bounded multi-service optimizer
+ * and can be applied only through human approval.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
     startDate: weekStart,
     dayCount: 7,
     timeZone,
+    includeOpaqueBusy: true,
   });
 
   if (!ctx.patients.has(body.patient_id)) {
@@ -104,8 +105,8 @@ export async function POST(request: NextRequest) {
       week_start: weekStart,
       timezone: timeZone,
       /**
-       * Honesty flag. Phase 1 has no solver: these figures bracket the answer
-       * rather than optimize it.
+       * Honesty flag for this focused endpoint: these figures are greedy
+       * bounds, not a whole-week optimization result.
        */
       method: "greedy-with-upper-bound",
       optimal: analysis.exact,

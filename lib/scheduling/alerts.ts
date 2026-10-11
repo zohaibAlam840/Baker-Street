@@ -201,9 +201,9 @@ export function scopeAlerts(
   ctx: ScheduleContext,
   providerId: UUID | null,
   /**
-   * Whether this user is limited to their own work. The caller decides, so
-   * this module stays free of the role model — the rest of `lib/scheduling`
-   * has to be portable to the solver service, and a role enum would not be.
+   * Whether this user is limited to their own work. The caller owns
+   * authorization scope so scheduling code stays independent of application
+   * role types and reusable by the optimizer and related workflows.
    */
   restricted: boolean,
 ): Alert[] {

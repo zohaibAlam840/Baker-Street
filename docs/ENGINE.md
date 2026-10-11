@@ -1,293 +1,239 @@
-# Scheduling engine — Phase 1
+# Scheduling engine and approval workflow
 
-Implements Phase 1 of *Dynamic Scheduler for BSH-1.docx* v2.0 (§71): database,
-service configuration, and conflict detection. No solver, no AI — both come
-later, and §71 is explicit that they should.
+The application implements the scheduling foundation, deterministic
+multi-service plan generation, and human approval workflow described in
+*Dynamic Scheduler for BSH-1.docx* v2.0. AI does not decide a schedule, and
+this implementation does not claim to be a CP-SAT/global-optimum solver.
 
 ## The rule that shapes everything
 
-ABA is a row in `services` with an `optimization_profile`. It is not a branch in
-any code path. Adding Podiatry (§72) should mean inserting configuration rows,
-not editing the engine. If you find yourself writing `if (service_code ===
-"ABA_DIRECT")`, that is the failure mode §74 warns about.
+ABA is a row in `services` with an `optimization_profile`. It is not a branch
+in any code path. Adding Podiatry should mean inserting configuration rows,
+not editing the engine. Code such as `if (service_code === "ABA_DIRECT")`
+would break the service-agnostic model.
+
+Authorization and clinical need also remain separate. Payer authorization is
+a ceiling; `patient_service_requirements` independently stores the clinical
+minimum, target, maximum, required flag, and priority.
 
 ## Layout
 
+```text
+supabase/migrations/                    Schema, Auth profiles, RLS, workflows,
+                                        push, and atomic optimizer approval
+supabase/tests/rls_access.sql           Seven-role database access checks
+scripts/seed.ts                         Deterministic synthetic clinic seed
+scripts/seed-auth-users.ts              Test accounts for all roles
+
+lib/domain/time.ts                      Zoned wall-clock helpers
+lib/domain/slots.ts                     15-minute grid and range algebra
+lib/domain/types.ts                     Domain and candidate types
+
+lib/rules/context.ts                    In-memory horizon snapshot
+lib/rules/violations.ts                 Structured rejection reasons
+lib/rules/engine.ts                     Shared scheduling constraints
+lib/rules/travel.ts                     Pluggable travel model
+
+lib/scheduling/availability.ts          Ranked single-visit slot search
+lib/scheduling/candidates.ts            Legal candidate generation
+lib/scheduling/fillService.ts           Focused single-service bounds
+lib/scheduling/optimizer.ts             Bounded multi-service week search
+lib/scheduling/actions.ts               Server-side approval orchestration
+lib/scheduling/weekView.ts              Calendar projection
+lib/scheduling/summary.ts               Scheduled / need / authorization view
+
+app/api/scheduling/check-conflict/      Conflict-check API
+app/api/scheduling/availability/        Ranked-availability API
+app/api/scheduling/fill-service/        Single-service analysis API
+app/(app)/approvals/                     Plan comparison and approval
+components/optimizer/                   Mobile-ready approval controls
 ```
-supabase/schema.sql          22 tables, spec §9-26. Paste into the SQL editor.
-scripts/seed.ts              Projects the acceptance scenario into Supabase.
 
-lib/domain/time.ts           Timezone-aware wall-clock helpers. DST-safe.
-lib/domain/slots.ts          The 15-minute slot grid (§28) and range algebra.
-lib/domain/types.ts          Row types + CandidateAppointment (§27).
+## Two planning tools, with different promises
 
-lib/rules/context.ts         In-memory horizon snapshot; derived availability.
-lib/rules/violations.ts      Typed, structured rejection reasons.
-lib/rules/engine.ts          The 17 hard/soft rules (§6).
-lib/rules/travel.ts          Pluggable travel model (§40).
+### Focused Fill Service analysis
 
-lib/scheduling/availability.ts   Ranked slot search (§49).
-lib/scheduling/candidates.ts     Candidate generation (§29-30).
-lib/scheduling/fillService.ts    Fill Service analysis (§43-44, 51, 67).
-lib/scheduling/weekView.ts       Grid view model (pure projection).
-lib/scheduling/summary.ts        Per-service scheduled / need / authorized.
-lib/data/snapshot.ts         Supabase loader, with a synthetic fallback.
-lib/testing/scenario.ts      The §70/§77 acceptance scenario.
+`analyseFillService()` answers how close one patient can get to a target for
+one service. It brackets the answer instead of pretending its greedy packing
+is always optimal:
 
-app/api/scheduling/check-conflict/  POST, §48
-app/api/scheduling/availability/    GET,  §49
-app/api/scheduling/fill-service/    POST, §47
-
-app/schedule/                       Index: patients and providers
-app/schedule/patient/[patientId]/   Patient week view
-app/schedule/provider/[providerId]/ Provider week view
-components/schedule/                Grid, stat tiles, legend, table views
-```
-
-## Answering the acceptance question without a solver
-
-`analyseFillService()` brackets the answer instead of pretending to optimize:
-
-| | meaning |
+| Field | Meaning |
 |---|---|
-| `upper_bound_additional_hours` | the most that could fit under perfect packing — the patient/provider overlap, capped by authorization and clinical maximum. No optimum can beat it. |
-| `achievable_additional_hours` | what a greedy longest-first pass actually places. No optimum is worse. |
-| `exact` | the two agree, so the answer is provably best and CP-SAT would add nothing. |
+| `upper_bound_additional_hours` | The most that could fit under perfect packing, capped by authorization and the clinical maximum. |
+| `achievable_additional_hours` | Hours the legal longest-first pass actually places. |
+| `exact` | The bounds agree, so no arrangement can add more hours for that focused question. |
 
-On the acceptance scenario both come to 3h, so `exact` is true: John reaches
-exactly 30 ABA hours via a single Saturday 14:00–17:00 block with Cara, and the
-three required services are untouched. That question is answered, today,
-without a solver.
+This remains useful for a quick capacity explanation and the Fill Service API.
+It does not coordinate competing services and it never commits its analytical
+placements.
 
-Ask for 40 hours and it reports why not, most-limiting first (§67):
+### Multi-service patient-week optimizer
 
-```
-1. Only 3h of authorization remain.
-2. Clinical maximum is 30h per week.
-3. 3h held by protected or locked appointments for other services.
-4. Only 8h where the patient is free and an eligible provider is available.
-5. Patient is unavailable during school.
-```
+`optimizePatientWeek()` considers every configured service goal for the patient
+together. It:
 
-### What this still cannot do
+1. Builds clinical goals from requirements, active authorizations, and current
+   scheduled care.
+2. Generates candidates across eligible providers, declared clinical
+   locations, legal durations, authorizations, and alternative rooms/resources.
+3. Rejects candidates that fail the shared rule engine, including DST-invalid
+   wall-clock ranges.
+4. Searches a deterministic bounded beam under several objective orders:
+   balanced coverage, continuity, fewest visits, preferences, and earliest
+   completion.
+5. Re-proves every selected appointment together against a progressively
+   updated snapshot before returning a plan.
+6. Produces stable plan IDs from canonical clinical goals, selected
+   appointments, and metrics so the reviewed option can be identified safely.
 
-Each run considers **one service in isolation**. Ask it to fill ABA and it will
-claim the Saturday gap; ask it to fill parent training and it will claim the
-same gap. Resolving that competition — every service weighed together against a
-configurable objective hierarchy (§7) — is exactly what CP-SAT is for, and it
-is the reason Phase 2 exists. Greedy also cannot prove optimality when the
-bounds disagree; it reports `PACKING_GAP` and says so.
+The result status is intentionally explicit:
 
-## The read-only UI
+| Status | Meaning |
+|---|---|
+| `TARGETS_MET` | A legal plan reaches every configured target. |
+| `FEASIBLE` | A legal improvement was found but some targets remain short. |
+| `INFEASIBLE` | No addable legal plan was found for the current snapshot. |
+| `BOUNDED` | A safety limit was reached; this is the best plan found, not proof that no better plan exists. |
 
-Two week views, both server-rendered, both read-only. Phase 1 has no solver and
-no writes, so nothing here edits anything — the point is to *see* what the rule
-engine is reasoning about.
+This is a real multi-service optimizer, but it is not CP-SAT. Search candidate,
+beam, and operation limits keep a server-rendered request responsive. A future
+CP-SAT service could consume the same candidates when global optimality or
+large-scale rearrangement becomes necessary.
 
-The grid defaults every column to blocked and lets availability punch lighter
-holes in it, so "when could this patient be seen?" is the shape you read
-directly rather than infer from absence. On the acceptance scenario the free
-Saturday 14:00–17:00 gap is visible at a glance — the exact three hours the
-optimizer will fight over in Phase 2.
+## Atomic human approval
 
-### Colour
+The optimizer proposes and a permitted person approves. The browser sends only
+the patient, week, stable plan ID, and approval reason; it never supplies the
+appointment payload that will be written.
 
-Blocks are tinted by **department**, not by service, using four hues validated
-against all pairs in both light and dark mode (colourblind separation and
-normal-vision floors). Departments past the fourth fold into "other" rather
-than taking a fifth hue — no fifth colour clears the gate against these four.
+`approveOptimizationPlan()` performs the following sequence:
 
-Nothing depends on colour alone: every block carries its service name, locked
-and protected appointments carry a glyph and a screen-reader label, and both
-views have a table twin showing the same values with no colour at all. **Do not
-substitute the hexes in `globals.css` without re-running a palette validator.**
+1. Requires `schedule.approve` and a meaningful reason.
+2. Checks the idempotency key first, making a retry after a lost mobile response
+   safe.
+3. Reloads fresh RLS-scoped data in the patient's timezone.
+4. Recomputes the plans and rejects an option whose stable ID disappeared.
+5. Sends only the server-reconstructed plan to
+   `approve_optimization_plan(...)`.
 
-### Stat tiles
+The Postgres function is the commit boundary. It locks and revalidates the
+live patient, provider, authorization, availability, and resource state,
+enforces the weekly clinical limits, and inserts the optimization request,
+appointments, resource links, and audit entry in one transaction. Any error
+rolls back every write. The unique idempotency key prevents duplicate approval.
 
-"27 of 30 hours" is one number with a context, so it is a stat tile, not a
-chart of a single value. The patient view's tiles deliberately keep scheduled,
-target and authorized visually separate, and the authorization tile says in
-words that unused authorization is *not* the same as available capacity (§51).
+Successful approval revalidates the dashboard, schedule, approvals page, and
+patient record. The audit log records the actor, request/result linkage, plan
+summary, and decision reason.
 
-## Why the rule engine is shaped this way
+## Why the rule engine is shared
 
-**One implementation, three callers.** `evaluateBooking()` serves
-`/check-conflict` today, and in Phase 2 it becomes both the candidate-generation
-pre-filter (§29) and the revalidation step inside the approval transaction
-(§63). Three copies of "is this legal?" would drift, and the copy that drifts is
-the one guarding the commit.
+`evaluateBooking()` serves conflict checks, ranked availability, candidate
+generation, optimizer proof, and interactive booking validation. Rules return
+structured reasons rather than booleans, every rule runs, and no rule queries
+the database. This keeps explanations useful and prevents separate callers
+from silently developing different definitions of “legal.”
 
-**Rules return reasons, not booleans.** §67 requires infeasibility to be
-explained — "27 available RBT hours", "no eligible RBT Wednesday 3-5",
-"remaining authorization = 3 hours". That is only possible if every rejection
-carries structured detail. `Violation.detail` is what the explanation layer will
-quote.
+The database repeats authoritative commit-time checks. That is deliberate,
+not duplicate business logic by accident: in-memory evaluation creates fast,
+explainable options, while the transaction protects against stale data and
+concurrent users.
 
-**Every rule runs; none short-circuit.** A user fixing one conflict wants to see
-the other three.
+For caseload-scoped clinical users, `optimization_busy_intervals` supplies
+PHI-minimal occupied intervals for unrelated patients. The optimizer can avoid
+provider and room collisions without exposing whose appointment created the
+busy time.
 
-**Pure functions over an in-memory snapshot.** No rule queries the database.
-Candidate generation will call these thousands of times per run, and the what-if
-engine (§50) needs to clone a scenario without touching production data. It also
-means the whole engine ports to Python unchanged if CP-SAT ends up in a separate
-service.
+## Time and horizons
 
-## Authorization is not clinical need
+All scheduling arithmetic uses a 15-minute `SlotGrid`. Local availability is
+expanded in the configured IANA timezone; appointment timestamps remain
+absolute instants. Wall-clock ranges that are nonexistent or ambiguous at a
+DST transition are rejected.
 
-`authorizations.authorized_hours` is a ceiling from the payer.
-`patient_service_requirements` carries the clinical floor, target and maximum,
-independently. A patient can be authorized 30h, clinically need 20h, and be
-targeted at 25h. The engine never treats authorized hours as required hours —
-§10 is emphatic about this and it is the single easiest thing to get wrong.
+Weekly totals require a whole-week horizon. Routes normalize an input date to
+the containing Monday, and availability searches load complete weeks before
+narrowing the returned window.
 
-## Horizons must span whole weeks
+The in-memory authorization usage helper sees appointments loaded in the
+current horizon. For an authorization spanning a longer period, the database
+approval function performs the authoritative full-period check and may reject
+a plan if usage changed or existed outside the displayed week.
 
-Weekly figures (authorized hours per week, required sessions per week) are
-computed from the appointments inside the loaded horizon. A horizon anchored on
-whatever day the caller asked about silently excludes the rest of that week and
-reports hours as available that are already spent. Both routes anchor to
-`startOfWeek()`; `findAvailability()` takes a separate `window` so results can
-still be narrowed to the requested dates. There is a regression test for this in
-`lib/domain/time.test.ts`.
+## Interface behavior
 
-### Known limitation
+The responsive shell uses a desktop sidebar and a phone bottom bar. Navigation
+comes from the signed-in profile's permissions. Provider and clinical access is
+also constrained by Postgres RLS, provider/profile links, and care-team rows;
+hiding a navigation item is not the security boundary.
 
-`slotsUsedAgainstAuthorization()` counts only appointments **inside the
-horizon**. That is correct for authorizations scoped to a week. An authorization
-spanning months will under-count usage from outside the loaded window. Before
-real data, either load usage totals separately or store a running
-`units_consumed` on the authorization.
+The calendar views remain useful read surfaces, while authorized workflows can
+create and update appointments, configuration, clinical/payer records, and
+care-team assignments. The Plan optimizer compares complete alternatives and
+uses an explicit review/confirmation step before approval.
 
-## Running it
+Color never carries meaning alone. Calendar blocks retain labels and accessible
+state text, and wide views have table or horizontally scrollable equivalents
+for mobile use.
 
-```bash
-npm run test        # 53 constraint tests
-npm run typecheck
-npm run dev         # then open /schedule
-```
+## Acceptance scenario
 
-If `npm run dev` ever dies with a Turbopack panic citing
-`0xc0000142` while processing `globals.css`, that is Windows failing to spawn
-the PostCSS worker — usually too many stale `node` processes. Kill them, or run
-`npx next dev --webpack` as a fallback. It is not a CSS error; the stylesheet
-compiles cleanly under the Tailwind CLI.
+`lib/testing/scenario.ts` builds John Reyes with 30 authorized ABA hours, 27
+scheduled hours, required therapy/OT/parent-training care, multiple clinicians,
+two clinics, a school block, rooms, and locked/protected appointments.
 
-Without Supabase credentials the API routes fall back to the built-in scenario
-so the endpoints work on a fresh clone. Every response carries
-`meta.synthetic_data`, so a demo is never mistaken for real data.
+The focused Fill Service bounds agree that exactly three ABA hours can be added
+in the acceptance week. The multi-service optimizer independently protects all
+required services while comparing the legal ways to close that gap. This
+scenario is a regression fixture, not production data.
 
-With Supabase:
+## Running locally
 
-```bash
-# 1. Paste supabase/schema.sql into the SQL editor and run it.
-# 2. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
-npx tsx scripts/seed.ts
-```
-
-### Try it
-
-```bash
-curl "http://localhost:3000/api/scheduling/availability?\
-patient_id=pat-john&service_id=svc-aba-direct&\
-date_start=2026-09-21&date_end=2026-09-27&duration=60&limit=5"
+```powershell
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run dev
 ```
 
-## The acceptance scenario
+For live data, configure `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, then apply every migration in
+`supabase/migrations` in order. Do not install only `supabase/schema.sql`; it
+does not represent the complete migrated application.
 
-`lib/testing/scenario.ts` builds §70/§77: John Reyes, 30h ABA authorized, 27h
-scheduled, one required session each of therapy, OT and parent training, four
-RBTs on different availability patterns, two clinics, a school block, and
-protected and locked appointments.
+Ordinary application reads use the authenticated user's Supabase session and
+RLS. `SUPABASE_SERVICE_ROLE_KEY` is server-only and reserved for controlled
+seed/administrative scripts.
 
-The week is deliberately tight. Exactly three unbooked hours sit inside John's
-availability — Saturday 14:00–17:00 — and Alice (his usual RBT, and his stated
-preference) leaves at 15:00, so reaching 30 hours costs either a provider change
-or a location change. That is the trade-off §8 says the system must surface as
-*alternatives* rather than collapsing into one answer.
+```powershell
+npx.cmd supabase db push --linked
+npx.cmd tsx scripts/seed.ts
+npm.cmd run seed:users
+```
 
-## What Phase 2 adds
+Use `USE_SYNTHETIC_DATA=true` only when intentionally running the built-in
+clinic fixture.
 
-Candidate generation (§29-30) and infeasibility explanation (§67) are **done** —
-`generateCandidates()` already emits `CandidateAppointment[]`, the exact shape
-CP-SAT consumes as optional intervals, with the rejection tally that feeds the
-explanations.
+## Performance and determinism
 
-What remains is the solver itself: CP-SAT over those candidates (§31-37),
-lexicographic optimization (§45), and Top-N diverse solutions (§56). CP-SAT has
-no JavaScript port, so that needs a Python service. Everything under `lib/rules`
-and `lib/scheduling` is free of Next.js and Supabase imports precisely so it can
-move there — `generateCandidates()` output serialises straight to JSON and can
-be handed over a wire unchanged.
+Candidate generation caches week dates and wall-clock conversions. Candidate
+counts scale with open time; `startStepSlots` trades granularity for speed and
+`maxCandidates` is the generation safety valve. The optimizer separately caps
+search candidates, beam width, and search operations.
 
-### Performance note
+Database row order must not affect candidate order, plan selection, or plan
+IDs. Providers, services, durations, authorizations, locations, resources, and
+tie-breakers are canonicalized. Regression tests reverse snapshot rows and
+assert identical plan identities.
 
-Rule evaluation runs tens of thousands of times per generation, so the date
-rules read `ScheduleContext.dateOfSlot()` rather than formatting through `Intl`
-— a week has seven answers, and caching them cut the acceptance analysis from
-2.2s to 0.95s. Keep `Intl` out of the hot path.
+## Current boundaries
 
-Candidate counts scale with open time; `startStepSlots` trades granularity for
-speed (4 = hourly starts, roughly 3x faster), and `maxCandidates` is the safety
-valve that sets `truncated`.
-
-Do not start the solver until every test in `lib/rules/engine.test.ts` passes
-against real seeded data, not just the in-memory fixture.
-
----
-
-## The interface
-
-Responsive web app: a sidebar on desktop, a bottom tab bar on phones. One
-layout (`app/(app)/layout.tsx`) produces both. Navigation is built from the
-signed-in role's permissions, so a role never sees a link to something it
-cannot open.
-
-Screens: dashboard, schedules (patient and clinician weeks), patients,
-clinicians, fill service, authorizations, clinical requirements, capacity,
-configuration, audit — plus a mobile "More" menu holding whatever the tab bar
-could not fit.
-
-### Where it departs from the reference design
-
-The visual reference fills its bars with diagonal hatching and overlays three
-unlabelled curves on an axis-free chart. Both were dropped:
-
-- **No decorative texture.** Dense angled fills read as noise at this size and
-  are a vestibular risk. Texture is reserved for the accessibility case
-  (forced colours, print), where it carries meaning.
-- **Charts carry readable values.** Every figure on screen is also present as
-  text, so nothing is reachable only by hovering.
-
-Kept from the reference: the card grid, the rounded frame, the green brand and
-the segmented "barcode" stat strips.
-
-### Colour
-
-Two systems, deliberately separate. **Brand green** dresses the chrome and
-never identifies a series. **Four categorical hues** identify departments in
-charts; every pair clears the colourblind and normal-vision floors in both
-light and dark mode, tested against all pairs because a calendar puts arbitrary
-services side by side. A fifth department folds into "other" rather than taking
-an unvalidated fifth hue.
-
-`--brand` is 5.48:1 against white, which is why it is the same value in both
-modes — white button text passes either way.
-
-### Synthetic data
-
-`lib/testing/clinic.ts` builds the §69 roster — 20 patients, 10 RBTs, 3 BCBAs,
-3 therapists, 2 OTs, 2 psychologists, 1 neuropsychologist, three clinics — on
-top of the acceptance scenario, so John Reyes keeps his exact 27-of-30-hours
-setup while the building fills up around him.
-
-Deterministic, and **every generated appointment is re-proved against the real
-rule engine** (78 of 78 valid). That check is worth keeping: earlier versions
-booked clinicians outside their availability, double-booked rooms, and used
-durations the service does not offer — all of which looked fine on screen.
-
-### Known gaps
-
-- Dark-mode tokens are defined and exercised but have not been visually
-  reviewed; headless Edge ignored the colour-scheme override.
-- Every screen is read-only. Nothing writes, so the audit log is genuinely
-  empty.
+- The bounded TypeScript optimizer does not prove a global optimum when it
+  returns `FEASIBLE` or `BOUNDED`.
+- It adds appointments; moving/canceling existing appointments is not yet part
+  of plan search.
+- Fill Service remains a focused greedy lower-bound/upper-bound analysis.
+- A native iOS/Android binary, EHR integration, claim submission, and a
+  language model are not included.
+- Synthetic data is available for demonstrations, but production readiness
+  still requires the controls and drills in `docs/PRODUCTION_RUNBOOK.md`.

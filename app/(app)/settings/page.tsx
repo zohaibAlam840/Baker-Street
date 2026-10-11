@@ -78,18 +78,20 @@ export default async function SettingsPage() {
       <Card>
         <CardHeader
           title="What this build does"
-          sub="Phase 1 of the specification"
+          sub="Current implemented capabilities"
         />
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
             "22-table schema covering patients, services, clinicians, rooms and authorizations",
             "Seventeen hard-constraint rules, each returning a reason rather than a refusal",
             "Ranked availability search with an explained score",
-            "Candidate generation — the exact input a CP-SAT solver consumes",
+            "Deterministic candidate generation across providers, locations and resources",
             "Fill Service analysis with upper and lower bounds",
+            "Bounded multi-service patient-week plans with stable plan identities",
+            "Atomic human approval with live revalidation, idempotency and audit history",
             "Infeasibility explanations ordered by what is actually binding",
             "Hiring and what-if simulation against an in-memory copy",
-            "Role-based access with seven roles and scoped data",
+            "Supabase Auth and database-enforced access for seven scoped roles",
           ].map((item) => (
             <li key={item} className="flex gap-2.5">
               <span
@@ -112,8 +114,9 @@ export default async function SettingsPage() {
         />
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
-            "No CP-SAT solver — options come from heuristics, not a proved optimum",
-            "No multi-service trade-off: each service is optimised on its own",
+            "No CP-SAT/global-optimum proof when bounded search cannot reach every target",
+            "Optimizer adds visits; it does not yet move or cancel existing appointments",
+            "No reject/defer workflow for generated plans yet",
             "No native iOS or Android package; the mobile experience is an installable PWA",
             "No billing claim submission or electronic health-record integration",
             "No language model — the assistant is a fixed-phrase parser",
@@ -137,11 +140,11 @@ export default async function SettingsPage() {
         <CardHeader title="Before real patient data" />
         <ol className="mt-4 space-y-2">
           {[
-            "Confirm Supabase Auth or replace it with the practice's identity provider",
-            "Run the PostgreSQL access suite and complete the production security review",
+            "Confirm the seven-role model, approval policy and production identity provider",
+            "Apply every migration and run the PostgreSQL role and approval access suites",
             "Link every clinical account to a provider record and active care teams",
-            "A paid database plan and a signed business associate agreement",
-            "Encryption in transit and at rest, with audited access",
+            "Use an eligible paid database plan with a signed business associate agreement",
+            "Complete backup, rollback, monitoring and security review drills",
           ].map((step, index) => (
             <li key={step} className="flex gap-3">
               <span className="text-xs tabular-nums text-[var(--ink-muted)]">

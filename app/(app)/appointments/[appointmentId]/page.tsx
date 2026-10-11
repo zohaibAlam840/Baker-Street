@@ -7,6 +7,7 @@ import { can } from "@/lib/auth/roles";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
+import { formatDateTimeLocal } from "@/lib/domain/time";
 import { cancelAppointment, restoreAppointment, updateAppointment } from "@/lib/workflows/actions";
 
 export const dynamic = "force-dynamic";
@@ -22,14 +23,15 @@ export default async function AppointmentDetailPage({ params, searchParams }: {
   if (!appointment) notFound();
 
   const patient = ctx.patients.get(appointment.patient_id);
+  const displayTimeZone = patient?.timezone ?? ctx.grid.timeZone;
   const provider = appointment.provider_id ? ctx.providers.get(appointment.provider_id) : null;
   const service = ctx.services.get(appointment.service_id);
   const resources = ctx.rows.appointmentResources
     .filter((item) => item.appointment_id === appointment.id)
     .map((item) => ctx.resources.get(item.resource_id)?.name)
     .filter(Boolean);
-  const date = new Intl.DateTimeFormat("en-US", { timeZone: ctx.grid.timeZone, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(appointment.start_time));
-  const time = new Intl.DateTimeFormat("en-US", { timeZone: ctx.grid.timeZone, hour: "numeric", minute: "2-digit" });
+  const date = new Intl.DateTimeFormat("en-US", { timeZone: displayTimeZone, weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(appointment.start_time));
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: displayTimeZone, hour: "numeric", minute: "2-digit" });
 
   return (
     <div className="space-y-5">
@@ -55,8 +57,8 @@ export default async function AppointmentDetailPage({ params, searchParams }: {
               <Field label="Service"><input disabled className={inputClass} defaultValue={service?.service_name ?? "Unknown"} /></Field>
               <Field label="Clinician"><select name="provider_id" className={inputClass} defaultValue={appointment.provider_id ?? ""}><option value="">Unassigned</option>{[...ctx.providers.values()].map((item) => <option key={item.id} value={item.id}>{item.first_name} {item.last_name}</option>)}</select></Field>
               <Field label="Location"><select name="location_id" className={inputClass} defaultValue={appointment.location_id ?? ""}><option value="">No location</option>{[...ctx.locations.values()].map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
-              <Field label="Start"><input name="start_time" type="datetime-local" className={inputClass} defaultValue={appointment.start_time.slice(0, 16)} /></Field>
-              <Field label="End"><input name="end_time" type="datetime-local" className={inputClass} defaultValue={appointment.end_time.slice(0, 16)} /></Field>
+              <Field label="Start"><input name="start_time" type="datetime-local" className={inputClass} defaultValue={formatDateTimeLocal(new Date(appointment.start_time), displayTimeZone)} /></Field>
+              <Field label="End"><input name="end_time" type="datetime-local" className={inputClass} defaultValue={formatDateTimeLocal(new Date(appointment.end_time), displayTimeZone)} /></Field>
               <Field label="Status"><select name="status" className={inputClass} defaultValue={appointment.status}>{["SCHEDULED","CONFIRMED","COMPLETED","CANCELLED","NO_SHOW"].map((value) => <option key={value}>{value}</option>)}</select></Field>
               <Field label="Scheduling protection"><select name="scheduling_flexibility" className={inputClass} defaultValue={appointment.scheduling_flexibility}>{["FLEXIBLE","PROTECTED","LOCKED"].map((value) => <option key={value}>{value}</option>)}</select></Field>
             </div>
@@ -66,7 +68,7 @@ export default async function AppointmentDetailPage({ params, searchParams }: {
         </Card>
 
         <div className="space-y-4">
-          <Card><CardHeader title="Booking context" /><dl className="mt-4 space-y-3 text-sm"><Row label="Authorization" value={appointment.authorization_id ? "Linked" : "None"} /><Row label="Delivery" value={appointment.telehealth ? "Telehealth" : "In person"} /><Row label="Resources" value={resources.join(", ") || "None"} /><Row label="Timezone" value={ctx.grid.timeZone} /></dl></Card>
+          <Card><CardHeader title="Booking context" /><dl className="mt-4 space-y-3 text-sm"><Row label="Authorization" value={appointment.authorization_id ? "Linked" : "None"} /><Row label="Delivery" value={appointment.telehealth ? "Telehealth" : "In person"} /><Row label="Resources" value={resources.join(", ") || "None"} /><Row label="Timezone" value={displayTimeZone} /></dl></Card>
           <Card><CardHeader title="Related records" /><div className="mt-4 grid gap-2 text-sm">{patient && <Link className="underline underline-offset-4" href={`/patients/${patient.id}?week=${ctx.grid.startDate}`}>Patient record</Link>}{provider && <Link className="underline underline-offset-4" href={`/providers/${provider.id}?week=${ctx.grid.startDate}`}>Clinician record</Link>}{appointment.authorization_id && <Link className="underline underline-offset-4" href={`/authorizations/${appointment.authorization_id}?week=${ctx.grid.startDate}`}>Authorization</Link>}</div></Card>
           {can(session.role,"schedule.book")&&<Card><CardHeader title={appointment.status==="CANCELLED"?"Restore appointment":"Cancel appointment"}/>{appointment.status==="CANCELLED"?<form action={restoreAppointment} className="mt-4"><input type="hidden" name="appointment_id" value={appointment.id}/><button className="min-h-11 w-full rounded-full border border-[var(--border-ring)] text-sm">Restore appointment</button></form>:<form action={cancelAppointment} className="mt-4 space-y-3"><input type="hidden" name="appointment_id" value={appointment.id}/><textarea required name="reason" className={`${inputClass} min-h-20`} placeholder="Cancellation reason"/><button className="min-h-11 w-full rounded-full bg-red-700 text-sm font-medium text-white">Cancel appointment</button></form>}</Card>}
         </div>

@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set local search_path = public, extensions;
-select plan(30);
+select plan(39);
 
 select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnamespace = 'public'::regnamespace and relname = any(array[
   'patients','providers','appointments','authorizations','patient_service_requirements','patient_care_team','audit_log'
@@ -20,6 +20,15 @@ select extensions.ok(exists(select 1 from pg_constraint where conname='appointme
 select extensions.ok(exists(select 1 from pg_constraint where conname='appointments_provider_no_overlap'), 'provider overlap is blocked in the database');
 select extensions.ok(exists(select 1 from pg_trigger where tgname='audit_appointment_change_trigger' and not tgisinternal), 'appointment changes are audited by a database trigger');
 select extensions.ok((select relrowsecurity from pg_class where oid='push_subscriptions'::regclass), 'push subscriptions have RLS enabled');
+select extensions.ok(to_regprocedure('approve_optimization_plan(uuid,date,date,text,jsonb,jsonb,text)') is not null, 'atomic optimizer approval function is installed');
+select extensions.ok(to_regprocedure('create_appointment_series(jsonb,text)') is not null, 'atomic recurring booking function is installed');
+select extensions.ok(to_regprocedure('update_appointment_booking(uuid,uuid,uuid,timestamptz,timestamptz,appointment_status,scheduling_flexibility,jsonb,text)') is not null, 'atomic appointment update function is installed');
+select extensions.ok(to_regprocedure('optimization_busy_intervals(timestamptz,timestamptz)') is not null, 'PHI-free busy interval function is installed');
+select extensions.ok(to_regprocedure('app_schema_status()') is not null, 'deployment schema readiness function is installed');
+select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_appointment_linked_resources_trigger' and not tgisinternal), 'appointment resource integrity is checked at commit');
+select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_resource_link_removal_trigger' and not tgisinternal), 'required resource removal is checked at commit');
+select extensions.ok(exists(select 1 from information_schema.columns where table_schema='public' and table_name='appointments' and column_name='last_change_reason'), 'appointment changes retain their documented reason');
+select extensions.ok(has_function_privilege('authenticated','optimization_busy_intervals(timestamptz,timestamptz)','EXECUTE'), 'authenticated schedulers can request opaque conflicts');
 
 -- Exercise the actual policies under the authenticated Postgres role. Results
 -- are captured in a temp table and asserted after returning to postgres.

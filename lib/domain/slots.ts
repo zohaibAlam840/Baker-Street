@@ -9,7 +9,7 @@
  * the only currency the rule engine and the future solver speak.
  */
 
-import { Weekday, parseDateOnly, zonedParts, zonedTimeToInstant } from "./time";
+import { Weekday, addDays, parseDateOnly, zonedParts, zonedTimeToInstant } from "./time";
 
 export const SLOT_MINUTES = 15;
 export const SLOTS_PER_HOUR = 60 / SLOT_MINUTES; // 4
@@ -116,6 +116,9 @@ export class SlotGrid {
   readonly dayCount: number;
   /** Absolute instant of local midnight on each day of the horizon. */
   private readonly dayAnchors: Date[];
+  private readonly dayWeekdays: Weekday[];
+  private readonly instantCache = new Map<number, Date>();
+  private readonly wallClockRangeCache = new Map<string, boolean>();
 
   constructor(startDate: string, dayCount: number, timeZone: string) {
     this.startDate = startDate;
@@ -136,6 +139,9 @@ export class SlotGrid {
         ),
       );
     }
+    this.dayWeekdays = this.dayAnchors.map(
+      (anchor) => zonedParts(anchor, this.timeZone).weekday,
+    );
   }
 
   static week(startDate: string, timeZone: string): SlotGrid {
@@ -153,7 +159,7 @@ export class SlotGrid {
 
   /** The weekday (0 = Sunday) of horizon day `dayIndex`. */
   weekdayOf(dayIndex: number): Weekday {
-    return zonedParts(this.dayAnchors[dayIndex], this.timeZone).weekday;
+    return this.dayWeekdays[dayIndex];
   }
 
   /** Horizon day indices matching a recurring weekday rule. */
@@ -211,14 +217,64 @@ export class SlotGrid {
 
   /** The absolute instant a slot boundary sits at. */
   instantOf(slot: number): Date {
+    const cached = this.instantCache.get(slot);
+    if (cached) return cached;
     const dayIndex = Math.floor(slot / SLOTS_PER_DAY);
     const withinDay = slot % SLOTS_PER_DAY;
-    if (dayIndex >= this.dayCount) {
-      return new Date(this.horizonEnd().getTime() + slotsToMinutes(withinDay) * 60_000);
+    const localDate = addDays(this.startDate, dayIndex);
+    const { year, month, day } = parseDateOnly(localDate);
+    const minutes = slotsToMinutes(withinDay);
+    const instant = zonedTimeToInstant(
+      this.timeZone,
+      year,
+      month,
+      day,
+      Math.floor(minutes / 60),
+      minutes % 60,
+    );
+    this.instantCache.set(slot, instant);
+    return instant;
+  }
+
+  /**
+   * Whether both wall-clock boundaries exist and their elapsed duration still
+   * equals the requested slot duration. This rejects spring-forward gaps and
+   * ambiguous fall-back ranges before they can shift on conversion to UTC.
+   */
+  isValidWallClockRange(range: SlotRange): boolean {
+    const cacheKey = `${range.startSlot}:${range.endSlot}`;
+    const cached = this.wallClockRangeCache.get(cacheKey);
+    if (cached != null) return cached;
+    if (
+      range.startSlot < 0 ||
+      range.endSlot > this.totalSlots ||
+      range.startSlot >= range.endSlot
+    ) {
+      this.wallClockRangeCache.set(cacheKey, false);
+      return false;
     }
-    // Added as elapsed time from local midnight, which is what a wall-clock
-    // schedule means by "three hours after the day starts".
-    return new Date(this.dayAnchors[dayIndex].getTime() + slotsToMinutes(withinDay) * 60_000);
+    const boundaryMatches = (slot: number) => {
+      const dayIndex = Math.floor(slot / SLOTS_PER_DAY);
+      const withinDay = slot % SLOTS_PER_DAY;
+      const expectedDate = addDays(this.startDate, dayIndex);
+      const expectedMinutes = slotsToMinutes(withinDay);
+      const parts = zonedParts(this.instantOf(slot), this.timeZone);
+      const actualDate = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+      return (
+        actualDate === expectedDate &&
+        parts.hour * 60 + parts.minute === expectedMinutes
+      );
+    };
+    if (!boundaryMatches(range.startSlot) || !boundaryMatches(range.endSlot)) {
+      this.wallClockRangeCache.set(cacheKey, false);
+      return false;
+    }
+    const elapsedMinutes =
+      (this.instantOf(range.endSlot).getTime() - this.instantOf(range.startSlot).getTime()) /
+      60_000;
+    const valid = elapsedMinutes === slotsToMinutes(range.endSlot - range.startSlot);
+    this.wallClockRangeCache.set(cacheKey, valid);
+    return valid;
   }
 
   /** Exclusive end of the horizon, as an absolute instant. */

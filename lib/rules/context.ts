@@ -15,7 +15,7 @@ import {
   mergeRanges,
   subtractRanges,
 } from "../domain/slots";
-import { formatDateOnly, parseClockTime, withinEffectiveRange } from "../domain/time";
+import { formatDateOnly, parseClockTime } from "../domain/time";
 import {
   Appointment,
   Authorization,
@@ -107,6 +107,18 @@ export class ScheduleContext {
   readonly rows: SnapshotRows;
 
   private readonly windowCache = new Map<string, SlotRange[]>();
+  private readonly providerLocationCache = new Map<string, (UUID | null)[]>();
+  private readonly providerLocationWindowCache = new Map<
+    UUID,
+    { locationId: UUID | null; range: SlotRange }[]
+  >();
+  private readonly patientDeclaredWindowCache = new Map<UUID, SlotRange[]>();
+  private readonly patientRestrictionWindowCache = new Map<
+    string,
+    { restriction: PatientRestriction; range: SlotRange }[]
+  >();
+  private readonly patientCoverageCache = new Map<string, boolean>();
+  private readonly requirementCache = new Map<string, PatientServiceRequirement | null>();
   /**
    * Local date per horizon day, resolved once.
    *
@@ -264,6 +276,40 @@ export class ScheduleContext {
     );
   }
 
+  /** Locations where one declared clinical block covers the entire visit. */
+  providerLocationsForRange(providerId: UUID, range: SlotRange): (UUID | null)[] {
+    const cacheKey = `${providerId}:${range.startSlot}:${range.endSlot}`;
+    const cached = this.providerLocationCache.get(cacheKey);
+    if (cached) return cached;
+    const locations = new Set<UUID | null>();
+    let windows = this.providerLocationWindowCache.get(providerId);
+    if (!windows) {
+      const provider = this.providers.get(providerId);
+      windows = (this.providerAvailability.get(providerId) ?? [])
+        .filter(
+          (row) =>
+            row.availability_type === "CLINICAL" || row.availability_type === "PREFERRED",
+        )
+        .flatMap((row) =>
+          this.expand(row.day_of_week, row.start_time, row.end_time, row).map(
+            (window) => ({
+              locationId: row.location_id ?? provider?.home_location_id ?? null,
+              range: window,
+            }),
+          ),
+        );
+      this.providerLocationWindowCache.set(providerId, windows);
+    }
+    for (const window of windows) {
+      if (window.range.startSlot <= range.startSlot && range.endSlot <= window.range.endSlot) {
+        locations.add(window.locationId);
+      }
+    }
+    const result = [...locations].sort((a, b) => (a ?? "").localeCompare(b ?? ""));
+    this.providerLocationCache.set(cacheKey, result);
+    return result;
+  }
+
   /**
    * Windows in which a patient can be seen for `serviceId`: declared
    * availability, minus hard-unavailable blocks, minus restrictions that do
@@ -284,19 +330,60 @@ export class ScheduleContext {
     });
   }
 
+  /** True when one declared positive availability row covers the whole visit. */
+  patientAvailabilityCoversRange(patientId: UUID, range: SlotRange): boolean {
+    const cacheKey = `${patientId}:${range.startSlot}:${range.endSlot}`;
+    const cached = this.patientCoverageCache.get(cacheKey);
+    if (cached != null) return cached;
+    let windows = this.patientDeclaredWindowCache.get(patientId);
+    if (!windows) {
+      windows = (this.patientAvailability.get(patientId) ?? [])
+        .filter(
+          (row) =>
+            row.availability_type === "AVAILABLE" || row.availability_type === "PREFERRED",
+        )
+        .flatMap((row) => this.expand(row.day_of_week, row.start_time, row.end_time, row));
+      this.patientDeclaredWindowCache.set(patientId, windows);
+    }
+    const covered = windows.some(
+      (window) => window.startSlot <= range.startSlot && range.endSlot <= window.endSlot,
+    );
+    this.patientCoverageCache.set(cacheKey, covered);
+    return covered;
+  }
+
   /**
    * Restriction windows (school, work, other appointments) that block
    * `serviceId`. A restriction naming a `service_allowed` blocks everything
    * except that service.
    */
   patientBlockedWindows(patientId: UUID, serviceId: UUID | null = null): SlotRange[] {
-    const rows = this.patientRestrictions.get(patientId) ?? [];
-    const blocked: SlotRange[] = [];
-    for (const row of rows) {
-      if (serviceId && row.service_allowed === serviceId) continue;
-      blocked.push(...this.expand(row.day_of_week, row.start_time, row.end_time, row));
+    return mergeRanges(
+      this.patientRestrictionWindows(patientId, serviceId).map((item) => item.range),
+    );
+  }
+
+  /** Expanded restriction rows, cached for both rule checks and window subtraction. */
+  patientRestrictionWindows(
+    patientId: UUID,
+    serviceId: UUID | null = null,
+  ): { restriction: PatientRestriction; range: SlotRange }[] {
+    const cacheKey = `${patientId}:${serviceId ?? "any"}`;
+    let windows = this.patientRestrictionWindowCache.get(cacheKey);
+    if (!windows) {
+      windows = (this.patientRestrictions.get(patientId) ?? [])
+        .filter((row) => !serviceId || row.service_allowed !== serviceId)
+        .flatMap((restriction) =>
+          this.expand(
+            restriction.day_of_week,
+            restriction.start_time,
+            restriction.end_time,
+            restriction,
+          ).map((range) => ({ restriction, range })),
+        );
+      this.patientRestrictionWindowCache.set(cacheKey, windows);
     }
-    return mergeRanges(blocked);
+    return windows;
   }
 
   /** Windows where patient and provider are both free to meet. */
@@ -319,22 +406,34 @@ export class ScheduleContext {
       const link = this.providerServices.get(provider.id)?.get(serviceId);
       if (link?.eligible) out.push(provider);
     }
-    return out;
+    return out.sort((a, b) => a.id.localeCompare(b.id));
   }
 
   /** Authorizations for a patient/service pair, newest period first. */
   authorizationsFor(patientId: UUID, serviceId: UUID): Authorization[] {
     return (this.authorizations.get(patientId) ?? [])
       .filter((a) => a.service_id === serviceId)
-      .sort((a, b) => b.start_date.localeCompare(a.start_date));
+      .sort(
+        (a, b) =>
+          b.start_date.localeCompare(a.start_date) ||
+          a.id.localeCompare(b.id),
+      );
   }
 
   requirementFor(patientId: UUID, serviceId: UUID): PatientServiceRequirement | null {
-    return (
-      (this.patientServiceRequirements.get(patientId) ?? []).find(
-        (r) => r.service_id === serviceId,
-      ) ?? null
+    const cacheKey = `${patientId}:${serviceId}`;
+    if (this.requirementCache.has(cacheKey)) return this.requirementCache.get(cacheKey) ?? null;
+    const requirement = (
+      (this.patientServiceRequirements.get(patientId) ?? [])
+        .filter((r) => r.service_id === serviceId)
+        .sort(
+          (a, b) =>
+            b.effective_start.localeCompare(a.effective_start) ||
+            a.id.localeCompare(b.id),
+        )[0] ?? null
     );
+    this.requirementCache.set(cacheKey, requirement);
+    return requirement;
   }
 
   /** Slots already consumed against an authorization inside this horizon. */
@@ -383,14 +482,13 @@ export class ScheduleContext {
     );
     // A weekly rule can be effective for only part of the horizon, so each
     // expanded day is filtered on its own date rather than the horizon's.
-    return ranges.filter((range) =>
-      withinEffectiveRange(
-        this.grid.instantOf(range.startSlot),
-        this.grid.timeZone,
-        row.effective_start,
-        row.effective_end,
-      ),
-    );
+    return ranges.filter((range) => {
+      const day = this.dateOfSlot(range.startSlot);
+      return (
+        (!row.effective_start || day >= row.effective_start) &&
+        (!row.effective_end || day <= row.effective_end)
+      );
+    });
   }
 
   private cached(key: string, compute: () => SlotRange[]): SlotRange[] {

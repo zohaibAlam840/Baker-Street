@@ -123,6 +123,33 @@ export function formatDateOnly(instant: Date, timeZone: string): string {
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
+/** Render an instant for an HTML `datetime-local` control in a named zone. */
+export function formatDateTimeLocal(instant: Date, timeZone: string): string {
+  const p = zonedParts(instant, timeZone);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}T${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
+}
+
+/**
+ * Parse an HTML `datetime-local` value as clinic wall time, never as the
+ * server's local timezone. Non-existent DST wall times are rejected instead
+ * of silently moving an appointment by an hour.
+ */
+export function parseZonedDateTimeLocal(value: string, timeZone: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, y, m, d, h, minute] = match;
+  const numbers = [y, m, d, h, minute].map(Number);
+  const instant = zonedTimeToInstant(
+    timeZone,
+    numbers[0],
+    numbers[1],
+    numbers[2],
+    numbers[3],
+    numbers[4],
+  );
+  return formatDateTimeLocal(instant, timeZone) === value ? instant : null;
+}
+
 /** Shift a "YYYY-MM-DD" by whole days, without touching local time. */
 export function addDays(date: string, days: number): string {
   const { year, month, day } = parseDateOnly(date);

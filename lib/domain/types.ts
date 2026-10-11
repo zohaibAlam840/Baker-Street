@@ -1,5 +1,5 @@
 /**
- * Domain types mirroring the Phase 1 schema (supabase/schema.sql).
+ * Domain types mirroring the migration-managed Supabase schema.
  *
  * These are plain data. Nothing here knows about Supabase, Next.js or React,
  * so the rule engine built on top stays portable to a Python solver service if

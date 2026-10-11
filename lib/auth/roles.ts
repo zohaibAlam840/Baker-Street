@@ -312,10 +312,10 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     href: "/approvals",
-    label: "Options",
-    short: "Options",
+    label: "Plan optimizer",
+    short: "Plans",
     requires: ["schedule.optimize"],
-    description: "Alternative schedules, and what approving will do",
+    description: "Build, compare and safely approve multi-service plans",
     icon: "clipboard",
   },
   {

@@ -84,6 +84,7 @@ export async function GET(request: NextRequest) {
     startDate: horizonStart,
     dayCount: horizonDays,
     timeZone,
+    includeOpaqueBusy: true,
   });
 
   const slots = findAvailability(

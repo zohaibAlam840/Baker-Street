@@ -2,7 +2,7 @@
  * Travel time between locations (spec section 40).
  *
  * Travel can be a hard constraint or a scoring penalty depending on
- * configuration. Phase 1 ships a deliberately crude default so the rule exists
+ * configuration. The current build ships a deliberately crude default so the rule exists
  * and is tested; swapping in a real distance matrix later means replacing
  * `TravelModel` and nothing else.
  */

@@ -1,8 +1,9 @@
 # Front-end demo — what to show Baker Street
 
-Fourteen screens, light theme, responsive. Every figure on screen is computed
-by the scheduling engine from the synthetic clinic; nothing is mocked up in
-the markup.
+A responsive web/PWA product walkthrough. Scheduling figures are computed by
+the same rule engine used by live workflows; they are not hard-coded into the
+markup. Use synthetic mode for a safe demo and Supabase-backed mode only with
+approved test or production data.
 
 ## Screens, and the spec section each answers
 
@@ -15,13 +16,13 @@ the markup.
 | Assistant | §58-59 | Plain English in, structured request out, engine answers |
 | Find a time | §48-49 | Ranked legal slots with the score explained |
 | Fill service | §43-47 | How close to target, and what is stopping it (§67) |
-| Options | §8, §56, §60-62 | Alternative schedules and the approval workflow |
+| Plan optimizer | §8, §56, §60-63 | Bounded multi-service plans and atomic approval |
 | Simulation | §50-52 | What changes if the practice hires |
 | Capacity | §51, §54 | Authorized vs scheduled vs staffable |
 | Authorizations | §10 | Payer position, deliberately without clinical targets beside it |
 | Clinical | §9 | The four numbers: scheduled, minimum, target, authorized |
 | Configuration | §4, §42, §72 | Services as configuration — adding one is rows, not code |
-| Audit log | §26 | Honestly empty; nothing writes yet |
+| Audit log | §26 | Appointment, configuration, approval and override history |
 | Settings | §64 | Environment, and a plain list of what is missing |
 
 ### Detail pages
@@ -38,19 +39,25 @@ verified by request, not assumed.
 The patient record links straight to Fill service and Find a time for that
 patient, so the flow from record to action is one tap.
 
-## The three demo moments
+## The four demo moments
 
 **1. The acceptance question (§77).** Assistant → *"Get John to 30 hours of ABA
 this week without moving his OT or therapy."* It parses to a structured
 request, shown on screen, then answers: 30 hours reachable, the exact
 appointments, and *"no arrangement can do better."*
 
-**2. Explaining a no (§67).** Ask for 40 hours. Instead of "no solution":
+**2. Compare and approve a complete plan (§56, §60-63).** Open Plan optimizer,
+select John and compare the complete patient-week options. Point out the
+current-to-projected service metrics, required-care protection, rooms, provider
+continuity, and `BOUNDED` disclosure. Approval asks for a reason, reloads live
+data, recomputes the selected option, and commits every appointment or none.
+
+**3. Explaining a no (§67).** Ask for 40 hours. Instead of "no solution":
 only 3h of authorization remain, 3h are held by protected appointments, only
 8h where the patient is free and a clinician is available, and school blocks
 the mornings — ordered by what is actually binding.
 
-**3. Hiring does not fix it (§51-52).** Simulation → three more RBTs adds 144
+**4. Hiring does not fix it (§51-52).** Simulation → three more RBTs adds 144
 roster hours and **7 hours of delivered care**. The limit is when patients are
 free and what their authorizations allow, not headcount. This is the argument
 the capacity engine exists to make.
@@ -65,13 +72,16 @@ file, `lib/ai/interpret.ts`, and nothing else moves.
 
 ## Be straight about
 
-- Nothing writes. No booking, no approval, no audit entries. Buttons that would
-  write are visibly disabled with the reason.
-- No CP-SAT solver. Options come from named heuristics, each proved legal by
-  the rule engine. A solver would search the space properly.
-- Each service is optimised alone; the multi-service trade-off is Phase 2.
-- Sign-in is a role switcher, not authentication.
-- Every patient and clinician is invented.
+- Authorized workflows do write. Plan approval is human-initiated, recomputed
+  from current RLS-scoped data, revalidated in Postgres, and atomic.
+- The multi-service optimizer is a deterministic bounded search, not CP-SAT.
+  `BOUNDED` and `FEASIBLE` are not claims of global optimality.
+- Fill Service is intentionally a separate single-service bounds analysis; Plan
+  optimizer is the screen that resolves multiple services together.
+- Sign-in uses Supabase Auth. A profile must be active and every page/query is
+  constrained by permissions and Postgres row-level security.
+- Synthetic mode contains invented people. A live Supabase environment does
+  not, so use only approved data and accounts there.
 
 The Settings screen lists all of this, so the client can read it themselves
 rather than take it on trust.
@@ -114,20 +124,16 @@ same disclosure: no language model is connected.
 
 ## Sign-in and landing
 
-**Sign-in** is two panels. The left states what the build is — an interactive
-prototype of every feature in the specification — and lists the seven roles,
-each row a direct way in: initials, name, what the role does, its permission
-count. A stat strip closes it (14 screens, 17 hard constraints, 7 roles, 0
-decisions made by AI). The right is an ordinary sign-in form: work email,
-password, and a  field.
+**Sign-in** uses real Supabase email/password authentication. The form links to
+request-access and forgot-password flows; reset links return through the Auth
+callback. A new account remains on the pending screen until an administrator
+activates its profile, assigns the approved role, and—when applicable—links the
+clinical provider record.
 
-Presenting the roles on the panel rather than as chips under the form was a
-client request, and it reads better: the form is a form, and the roles get
-room to explain themselves.
-
-The fields are genuine inputs so the design can be judged, but nothing is
-verified. That is said once, next to the button — impossible to miss, and
-impossible to mistake for a security feature.
+The seven roles are no longer shortcuts around authentication. They are stored
+in `user_profiles`, drive permission checks and navigation, and are repeated in
+Postgres RLS. Provider and clinical scope comes from the provider/profile link
+and active care-team assignments.
 
 **Landing page** runs the full marketing sequence: hero with a live slice of
 the real dashboard (not an illustration — the numbers come from the demo
@@ -137,10 +143,9 @@ and a closing call to action.
 
 ### One implementation note
 
-A `<select name="role">` inside a form does reach a server action's FormData,
-which is why the sign-in form works. A `<button name>/<value>` does **not** —
-that was the earlier bug where every role button failed. The quick-access
-chips bind their role into the action instead of relying on the button value.
+Email confirmation may be disabled for an administrator-approved internal
+account flow, but account approval must remain mandatory. Password reset links
+must use the production callback URL configured in Supabase Auth.
 
 ## Mobile
 
@@ -234,27 +239,19 @@ only on the pages behind a permission check.
 
 ## Email and notifications: what actually exists
 
-Asked to verify these, the honest finding is that **neither had been built**,
-and neither appears in the specification.
+There is still no transactional email provider or appointment-reminder email
+workflow. Supabase Auth may send its own confirmation/reset messages when that
+feature is enabled, but the application does not send clinical email.
 
-Evidence:
+The application does include an RLS-scoped work queue and optional Web Push:
 
-- No mail library is installed and no mail code exists. `package.json` lists
-  five runtime dependencies: `next`, `react`, `react-dom`,
-  `@supabase/supabase-js`, and Tailwind. A search for `resend`, `nodemailer`,
-  `sendgrid`, `postmark`, `mailgun`, `smtp`, `sendMail` and `@react-email`
-  across the repo returns nothing.
-- The 78-section specification contains **zero** occurrences of "notification",
-  "email", "mail", "SMS", "remind", "alert" or "message". (Sanity check on the
-  same extraction: "authorization" 57, "ABA" 99, "solver" 24 — the text was
-  read correctly.)
-- The bell in the top bar was `<button type="button">` with no handler, and
-  the search box beside it was an `<input>` with no form and no `name`. Both
-  looked interactive on every screen and did nothing.
-
-**No test email was sent.** There is no provider account, no API key and no
-verified sender domain, so there is nothing to send with — and a message
-claiming otherwise would be worse than the gap.
+- Live engine alerts cover credentials, authorizations, clinical minimums, and
+  appointments without a clinician.
+- Stored `notifications` provide assigned follow-up tasks and read state.
+- A user can opt a device into Web Push from Settings. Subscriptions are tied
+  to that user and can be disabled from the device.
+- Lock-screen payloads are deliberately generic and contain no patient name,
+  diagnosis, authorization number, service, or appointment details.
 
 ### To add email later
 
@@ -266,7 +263,7 @@ claiming otherwise would be worse than the gap.
    appointment on Tuesday" is fine; one naming the service is a disclosure.
 4. An unsubscribe path and a record of consent per recipient.
 
-### What was built instead
+### Work queue behavior
 
 The bell now works, from data the engine already holds:
 
@@ -277,9 +274,10 @@ The bell now works, from data the engine already holds:
   figure.
 - **Appointments with no clinician.**
 
-Nothing is stored, queued or pushed. Alerts are computed from the current
-snapshot each time the panel opens, so they cannot go stale and there is no
-queue to fall out of sync.
+Engine alerts are computed from the current snapshot each time the work queue
+opens. Assigned tasks are stored separately, and a push notification is only a
+generic prompt to open the authenticated work queue; the protected details
+remain inside the application.
 
 Two decisions worth noting:
 

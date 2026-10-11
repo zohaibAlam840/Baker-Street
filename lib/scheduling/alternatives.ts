@@ -6,11 +6,10 @@
  * moves" — and explicitly not five variations that differ by an inconsequential
  * reordering.
  *
- * Without CP-SAT we cannot enumerate the true optimum set, so instead of
- * pretending, each option is produced by a *named strategy* with a stated
- * trade-off. The strategies are genuinely different objectives, which is what
- * makes the options meaningfully different; every one of them is proved legal
- * by the rule engine before it is offered.
+ * This legacy helper is intentionally single-service and greedy. Each option
+ * is produced by a named strategy and proved legal before it is offered. New
+ * whole-week flows use `optimizePatientWeek`, which coordinates all configured
+ * service goals with bounded deterministic search.
  */
 
 import { slotsToHours } from "../domain/slots";
@@ -145,7 +144,17 @@ export function buildAlternatives(
     // Deduplicate: two strategies that land on the same appointments are one
     // option, not two. This is the rule that keeps section 56 honest.
     const signature = placed
-      .map((c) => `${c.provider_id}@${c.start_slot}+${c.duration_slots}`)
+      .map((c) =>
+        [
+          c.service_id,
+          c.provider_id,
+          c.authorization_id ?? "no-auth",
+          c.location_id ?? "no-location",
+          [...c.resource_ids].sort().join(",") || "no-resource",
+          c.start_slot,
+          c.duration_slots,
+        ].join(":"),
+      )
       .sort()
       .join("|");
     if (seen.has(signature)) continue;
@@ -224,7 +233,13 @@ function packGreedily(
 
       placed.push(candidate);
       hours += candidateHours;
-      working = working.withExtraAppointments([candidateToAppointment(candidate, working)]);
+      working = working.withExtraAppointments(
+        [candidateToAppointment(candidate, working)],
+        candidate.resource_ids.map((resource_id) => ({
+          appointment_id: candidate.candidate_id,
+          resource_id,
+        })),
+      );
       progress = true;
       break;
     }

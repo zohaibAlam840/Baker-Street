@@ -5,9 +5,10 @@ import { evaluateBooking } from "@/lib/rules/engine";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { SLOTS_PER_DAY, SLOT_MINUTES, minutesToSlots } from "@/lib/domain/slots";
-import { formatClockTime, parseClockTime } from "@/lib/domain/time";
+import { formatClockTime, formatDateTimeLocal, parseClockTime } from "@/lib/domain/time";
 import { FlatTravelModel } from "@/lib/rules/travel";
 import { findAvailability } from "@/lib/scheduling/availability";
+import { resourceChoicesFor } from "@/lib/scheduling/candidates";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
 
 export const dynamic = "force-dynamic";
@@ -37,13 +38,24 @@ export default async function BookPage({
   await requirePermission("schedule.search_availability");
   const params = await searchParams;
 
-  const { ctx } = await loadHorizon({ startDate: params.week ?? defaultWeekStart() });
+  let { ctx } = await loadHorizon({
+    startDate: params.week ?? defaultWeekStart(),
+    includeOpaqueBusy: true,
+  });
 
   const patients = [...ctx.patients.values()]
     .filter((p) => p.status === "ACTIVE")
     .sort((a, b) => a.last_name.localeCompare(b.last_name));
 
   const patientId = params.patient ?? patients[0]?.id;
+  const patientTimeZone = patientId ? ctx.patients.get(patientId)?.timezone : null;
+  if (patientTimeZone && patientTimeZone !== ctx.grid.timeZone) {
+    ({ ctx } = await loadHorizon({
+      startDate: params.week ?? defaultWeekStart(),
+      timeZone: patientTimeZone,
+      includeOpaqueBusy: true,
+    }));
+  }
 
   const serviceIds = new Set([
     ...(ctx.patientServiceRequirements.get(patientId ?? "") ?? []).map((r) => r.service_id),
@@ -79,25 +91,35 @@ export default async function BookPage({
       ? ctx.providers.get(params.provider)
       : ctx.eligibleProviders(serviceId)[0];
 
-    check = evaluateBooking(
-      {
-        patient_id: patientId,
-        service_id: serviceId,
-        provider_id: provider?.id ?? null,
-        location_id: provider?.home_location_id ?? null,
-        authorization_id:
-          ctx.authorizationsFor(patientId, serviceId).find((a) => a.status === "ACTIVE")
-            ?.id ?? null,
-        resource_ids: [],
-        range: checkRange,
-        telehealth: false,
-      },
-      ctx,
-      {
-        travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
-        includeSoft: true,
-      },
-    );
+    const locationIds = provider
+      ? ctx.providerLocationsForRange(provider.id, checkRange)
+      : [null];
+    for (const locationId of locationIds) {
+      for (const resourceIds of resourceChoicesFor(ctx, serviceId, locationId, false)) {
+        const proof = evaluateBooking(
+        {
+          patient_id: patientId,
+          service_id: serviceId,
+          provider_id: provider?.id ?? null,
+          location_id: locationId,
+          authorization_id:
+            ctx.authorizationsFor(patientId, serviceId).find((a) => a.status === "ACTIVE")
+              ?.id ?? null,
+          resource_ids: resourceIds,
+          range: checkRange,
+          telehealth: false,
+        },
+        ctx,
+        {
+          travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
+          includeSoft: true,
+        },
+      );
+        check = proof;
+        if (proof.valid) break;
+      }
+      if (check?.valid) break;
+    }
   }
 
   const slots =
@@ -338,7 +360,7 @@ export default async function BookPage({
                   )}
 
                   <Link
-                    href={`/appointments/new?week=${ctx.grid.startDate}&patient=${patientId}&service=${serviceId}&provider=${slot.provider_id}&location=${slot.location_id ?? ""}&start=${encodeURIComponent(slot.start.slice(0, 16))}&duration=${slot.duration_minutes}`}
+                    href={`/appointments/new?week=${ctx.grid.startDate}&patient=${patientId}&service=${serviceId}&provider=${slot.provider_id}&location=${slot.location_id ?? ""}&start=${encodeURIComponent(formatDateTimeLocal(new Date(slot.start), ctx.grid.timeZone))}&duration=${slot.duration_minutes}`}
                     className="mt-4 block w-full rounded-full border border-[var(--brand)] px-3 py-2 text-center text-xs font-medium text-[var(--brand)]"
                   >
                     Review this appointment
@@ -351,9 +373,8 @@ export default async function BookPage({
       )}
 
       <p className="text-xs leading-relaxed text-[var(--ink-muted)]">
-        Booking is deliberately disabled. Writing an appointment has to go
-        through the approval workflow — lock, revalidate, commit, audit — and
-        that arrives with real authentication.
+        Times are shown in {ctx.grid.timeZone}. The selected opening goes
+        through live revalidation, an atomic commit, and audit history.
       </p>
     </div>
   );

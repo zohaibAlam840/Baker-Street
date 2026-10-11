@@ -41,6 +41,7 @@ export type ViolationCode =
   // Time
   | "TRAVEL_TIME_INSUFFICIENT"
   | "OUTSIDE_HORIZON"
+  | "LOCAL_TIME_INVALID"
   // Preferences designated hard
   | "HARD_PREFERENCE_VIOLATED";
 

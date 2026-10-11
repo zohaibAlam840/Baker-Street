@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SlotGrid } from "./slots";
-import { formatDateOnly, startOfWeek, zonedParts, zonedTimeToInstant } from "./time";
+import { formatDateOnly, formatDateTimeLocal, parseZonedDateTimeLocal, startOfWeek, zonedParts, zonedTimeToInstant } from "./time";
 
 const TZ = "America/New_York";
 
@@ -55,6 +55,17 @@ describe("zoned wall-clock conversion", () => {
     const instant = zonedTimeToInstant(TZ, 2026, 3, 8, 13, 0);
     expect(zonedParts(instant, TZ).hour).toBe(13);
   });
+
+  it("round-trips HTML local values without using the server timezone", () => {
+    const value = "2026-09-26T14:30";
+    const instant = parseZonedDateTimeLocal(value, TZ);
+    expect(instant).not.toBeNull();
+    expect(formatDateTimeLocal(instant!, TZ)).toBe(value);
+  });
+
+  it("rejects a wall time that does not exist during the spring DST jump", () => {
+    expect(parseZonedDateTimeLocal("2026-03-08T02:30", TZ)).toBeNull();
+  });
 });
 
 describe("SlotGrid across a DST boundary", () => {
@@ -89,5 +100,12 @@ describe("SlotGrid across a DST boundary", () => {
       "2026-10-31",
       "2026-11-01",
     ]);
+  });
+
+  it("converts a fall-transition slot back to the intended wall clock", () => {
+    const sundayAtOne = 6 * 96 + 52;
+    const instant = grid.instantOf(sundayAtOne);
+    expect(formatDateTimeLocal(instant, TZ)).toBe("2026-11-01T13:00");
+    expect(grid.slotOf(instant)).toBe(sundayAtOne);
   });
 });

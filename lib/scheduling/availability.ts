@@ -5,8 +5,9 @@
  * the rule engine, and ranks the survivors. No solver involved: this answers
  * "when could this happen?", not "what is the best whole-week schedule?".
  *
- * The same enumeration is what candidate generation (spec sections 29-30) will
- * reuse in Phase 2, with the ranking dropped and the results handed to CP-SAT.
+ * This remains a ranked single-service search. Whole-week scheduling uses the
+ * same rule engine through candidate generation and the bounded multi-service
+ * optimizer.
  */
 
 import { SLOTS_PER_DAY, SLOT_MINUTES, SlotRange, minutesToSlots } from "../domain/slots";
@@ -16,6 +17,7 @@ import { ScheduleContext } from "../rules/context";
 import { ProposedBooking, evaluateBooking } from "../rules/engine";
 import type { TravelModel } from "../rules/travel";
 import type { Violation } from "../rules/violations";
+import { resourceChoicesFor } from "./candidates";
 
 export interface AvailabilityQuery {
   patient_id: UUID;
@@ -52,6 +54,7 @@ export interface AvailableSlot {
   provider_id: UUID;
   provider_name: string;
   location_id: UUID | null;
+  resource_ids: UUID[];
   duration_minutes: number;
   score: number;
   /** Why it scored what it scored, so the UI can justify the ordering. */
@@ -120,7 +123,6 @@ export function findAvailability(
   for (const provider of providers) {
     const windows = ctx.meetingWindows(query.patient_id, provider.id, query.service_id);
     const preferredWindows = ctx.providerPreferredWindows(provider.id);
-    const locationId = query.location_id ?? resolveLocation(ctx, provider.id, query);
 
     for (const window of windows) {
       const from = Math.max(window.startSlot, query.window?.startSlot ?? 0);
@@ -128,70 +130,87 @@ export function findAvailability(
 
       for (let startSlot = from; startSlot + durationSlots <= until; startSlot += 1) {
         const range = { startSlot, endSlot: startSlot + durationSlots };
+        const locationIds = query.location_id
+          ? [query.location_id]
+          : query.telehealth
+            ? [resolveLocation(ctx, provider.id, query)]
+            : ctx.providerLocationsForRange(provider.id, range);
 
-        const proposal: ProposedBooking = {
-          patient_id: query.patient_id,
-          service_id: query.service_id,
-          provider_id: provider.id,
-          location_id: locationId,
-          authorization_id: authorizationId,
-          resource_ids: resolveResources(ctx, query.service_id, locationId, query.telehealth),
-          range,
-          telehealth: query.telehealth ?? false,
-        };
+        for (const locationId of locationIds) {
+          for (const resourceIds of resourceChoicesFor(
+            ctx,
+            query.service_id,
+            locationId,
+            query.telehealth,
+          )) {
+            const proposal: ProposedBooking = {
+              patient_id: query.patient_id,
+              service_id: query.service_id,
+              provider_id: provider.id,
+              location_id: locationId,
+              authorization_id: authorizationId,
+              resource_ids: resourceIds,
+              range,
+              telehealth: query.telehealth ?? false,
+            };
 
-        const { valid, violations } = evaluateBooking(proposal, ctx, {
-          travel: query.travel,
-          includeSoft: true,
-        });
-        if (!valid) continue;
+            const { valid, violations } = evaluateBooking(proposal, ctx, {
+              travel: query.travel,
+              includeSoft: true,
+            });
+            if (!valid) continue;
 
-        const notes = violations.filter((v) => v.severity === "SOFT");
-        const breakdown: ScoreComponent[] = [];
+            const notes = violations.filter((v) => v.severity === "SOFT");
+            const breakdown: ScoreComponent[] = [];
+            if (preferredProviderIds.has(provider.id)) {
+              breakdown.push({ label: "Preferred provider", points: WEIGHTS.preferredProvider });
+            }
+            if (incumbentProviderIds.has(provider.id)) {
+              breakdown.push({ label: "Provider continuity", points: WEIGHTS.continuity });
+            }
+            if (locationId && preferredLocationIds.has(locationId)) {
+              breakdown.push({ label: "Preferred location", points: WEIGHTS.preferredLocation });
+            }
+            if (coveredBy(range, preferredWindows)) {
+              breakdown.push({ label: "Provider's preferred hours", points: WEIGHTS.preferredWindow });
+            }
 
-        if (preferredProviderIds.has(provider.id)) {
-          breakdown.push({ label: "Preferred provider", points: WEIGHTS.preferredProvider });
+            const adjacency = adjacencyScore(ctx, query.patient_id, range);
+            if (adjacency !== 0) {
+              breakdown.push({
+                label: adjacency > 0 ? "Adjacent to existing appointment" : "Creates a gap in the day",
+                points: adjacency,
+              });
+            }
+            if (notes.length > 0) {
+              breakdown.push({
+                label: `${notes.length} preference miss${notes.length === 1 ? "" : "es"}`,
+                points: notes.length * WEIGHTS.softMissPenalty,
+              });
+            }
+
+            const score = breakdown.reduce((total, part) => total + part.points, 0);
+            const startInstant = ctx.grid.instantOf(range.startSlot);
+            results.push({
+              start: startInstant.toISOString(),
+              end: ctx.grid.instantOf(range.endSlot).toISOString(),
+              date: formatDateOnly(startInstant, ctx.grid.timeZone),
+              range,
+              provider_id: provider.id,
+              provider_name: `${provider.first_name} ${provider.last_name}`,
+              location_id: locationId,
+              resource_ids: resourceIds,
+              duration_minutes: durationMinutes,
+              score,
+              score_breakdown: breakdown,
+              notes,
+            });
+            // The booking workflow revalidates and reserves the room. One
+            // card per time/provider avoids filling mobile results with
+            // visually identical alternatives for interchangeable rooms.
+            break;
+          }
         }
-        if (incumbentProviderIds.has(provider.id)) {
-          breakdown.push({ label: "Provider continuity", points: WEIGHTS.continuity });
-        }
-        if (locationId && preferredLocationIds.has(locationId)) {
-          breakdown.push({ label: "Preferred location", points: WEIGHTS.preferredLocation });
-        }
-        if (coveredBy(range, preferredWindows)) {
-          breakdown.push({ label: "Provider's preferred hours", points: WEIGHTS.preferredWindow });
-        }
-
-        const adjacency = adjacencyScore(ctx, query.patient_id, range);
-        if (adjacency !== 0) {
-          breakdown.push({
-            label: adjacency > 0 ? "Adjacent to existing appointment" : "Creates a gap in the day",
-            points: adjacency,
-          });
-        }
-        if (notes.length > 0) {
-          breakdown.push({
-            label: `${notes.length} preference miss${notes.length === 1 ? "" : "es"}`,
-            points: notes.length * WEIGHTS.softMissPenalty,
-          });
-        }
-
-        const score = breakdown.reduce((total, part) => total + part.points, 0);
-        const startInstant = ctx.grid.instantOf(range.startSlot);
-
-        results.push({
-          start: startInstant.toISOString(),
-          end: ctx.grid.instantOf(range.endSlot).toISOString(),
-          date: formatDateOnly(startInstant, ctx.grid.timeZone),
-          range,
-          provider_id: provider.id,
-          provider_name: `${provider.first_name} ${provider.last_name}`,
-          location_id: locationId,
-          duration_minutes: durationMinutes,
-          score,
-          score_breakdown: breakdown,
-          notes,
-        });
       }
     }
   }
@@ -248,22 +267,4 @@ function resolveLocation(
     return telehealth?.id ?? null;
   }
   return ctx.providers.get(providerId)?.home_location_id ?? null;
-}
-
-/** Attach the first required resource available at the chosen location. */
-function resolveResources(
-  ctx: ScheduleContext,
-  serviceId: UUID,
-  locationId: UUID | null,
-  telehealth?: boolean,
-): UUID[] {
-  if (telehealth) return [];
-  const required = (ctx.serviceResources.get(serviceId) ?? []).filter((r) => r.required);
-  if (required.length === 0) return [];
-
-  const atLocation = required.find((link) => {
-    const resource = ctx.resources.get(link.resource_id);
-    return resource?.active && (!locationId || resource.location_id === locationId);
-  });
-  return atLocation ? [atLocation.resource_id] : [required[0].resource_id];
 }

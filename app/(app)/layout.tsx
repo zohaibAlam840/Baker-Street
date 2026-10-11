@@ -39,15 +39,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // The bell used to be a button with no handler. These are derived from
   // the current snapshot on each request, then narrowed to what this role
   // may see — the same scoping the dashboard uses.
-  const { ctx } = await loadHorizon({ startDate: defaultWeekStart() });
-  const alerts = groupAlerts(
-    scopeAlerts(
-    buildAlerts(ctx, formatDateOnly(today, ctx.grid.timeZone)),
-    ctx,
-    session.providerId,
-      definition.scope === "own" || definition.scope === "caseload",
-    ),
-  );
+  let alerts: ReturnType<typeof groupAlerts> = [];
+  try {
+    const { ctx } = await loadHorizon({ startDate: defaultWeekStart() });
+    alerts = groupAlerts(
+      scopeAlerts(
+        buildAlerts(ctx, formatDateOnly(today, ctx.grid.timeZone)),
+        ctx,
+        session.providerId,
+        definition.scope === "own" || definition.scope === "caseload",
+      ),
+    );
+  } catch (error) {
+    // A work-queue read must never take down navigation, settings, or audit.
+    // The destination pages still surface their own load errors with a digest.
+    console.error("Unable to build shell alerts", error);
+  }
   const dateLabel = today.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",

@@ -1,16 +1,15 @@
 /**
  * Candidate generation (spec sections 29-30).
  *
- * Produces the set of appointments that COULD legally exist, before any
- * optimization decides which of them should. The output is
- * `CandidateAppointment[]` — the intermediate model from section 27 — which is
- * exactly what a CP-SAT model consumes as optional intervals. Nothing here
- * chooses; choosing is the solver's job.
+ * Produces the set of appointments that COULD legally exist before plan search
+ * decides which of them should. The deterministic bounded patient-week
+ * optimizer consumes `CandidateAppointment[]` today; the same intermediate
+ * model remains compatible with a future CP-SAT service.
  *
- * Two things matter for Phase 2:
+ * Two things matter for every optimizer:
  *
  *  1. Candidates that violate an obvious hard rule are rejected HERE, not in
- *     the solver. A model given impossible intervals is slower and its
+ *     plan search. A model given impossible intervals is slower and its
  *     infeasibility is harder to explain.
  *  2. The rejection tally is kept. Section 67 requires "no eligible RBT
  *     available Wednesday 3-5" rather than "no solution", and the counts of
@@ -77,11 +76,35 @@ export function generateCandidates(
   let rejected = 0;
   let truncated = false;
 
-  const serviceIds = options.service_ids ?? defaultServiceIds(ctx, options.patient_id);
+  const incumbentProvidersByService = new Map<UUID, Set<UUID>>();
+  for (const appointment of ctx.appointmentsByPatient.get(options.patient_id) ?? []) {
+    if (!appointment.provider_id) continue;
+    let providers = incumbentProvidersByService.get(appointment.service_id);
+    if (!providers) {
+      providers = new Set<UUID>();
+      incumbentProvidersByService.set(appointment.service_id, providers);
+    }
+    providers.add(appointment.provider_id);
+  }
+  const preferences = ctx.patientPreferences.get(options.patient_id) ?? [];
+  const objectiveFlags = (serviceId: UUID, providerId: UUID) => ({
+    continuity: incumbentProvidersByService.get(serviceId)?.has(providerId) ?? false,
+    preferred: preferences.some(
+      (preference) =>
+        (!preference.preferred_service_id || preference.preferred_service_id === serviceId) &&
+        preference.preferred_provider_id === providerId,
+    ),
+  });
+  const resourceChoiceCache = new Map<string, UUID[][]>();
+
+  const serviceIds = [...(options.service_ids ?? defaultServiceIds(ctx, options.patient_id))].sort(
+    (a, b) => a.localeCompare(b),
+  );
 
   // Existing appointments for the services being generated come first: the
-  // solver needs them as candidates so it can decide to keep, move or drop
-  // them, and locked ones must be present or the model will schedule over them.
+  // plan search needs them as candidates so it can decide to keep, move or
+  // drop them, and locked ones must be present or the model can schedule over
+  // them.
   //
   // Appointments for OTHER services are deliberately left out. They are not
   // up for negotiation in this run, and they already constrain it through the
@@ -104,23 +127,38 @@ export function generateCandidates(
           is_existing: true,
           flexibility: appointment.scheduling_flexibility,
           target_service_id: options.target_service_id,
+          ...objectiveFlags(appointment.service_id, appointment.provider_id),
         }),
       );
     }
   }
 
+  // Only appointments that are actually in this optimization and allowed to
+  // move may be ignored while generating replacement candidates. The previous
+  // implementation ignored *every* patient appointment, which let a
+  // single-service run propose time on top of locked or out-of-scope care.
+  const inScope = new Set(serviceIds);
   const existingIds = new Set(
-    (ctx.appointmentsByPatient.get(options.patient_id) ?? []).map((a) => a.id),
+    includeExisting
+      ? (ctx.appointmentsByPatient.get(options.patient_id) ?? [])
+          .filter(
+            (appointment) =>
+              inScope.has(appointment.service_id) &&
+              appointment.scheduling_flexibility !== "LOCKED",
+          )
+          .map((appointment) => appointment.id)
+      : [],
   );
 
   outer: for (const serviceId of serviceIds) {
     const service = ctx.services.get(serviceId);
     if (!service || !service.active) continue;
 
-    const durations =
+    const durations = [...(
       options.durations ??
       ctx.serviceDurations.get(serviceId) ??
-      [service.default_duration_minutes];
+      [service.default_duration_minutes]
+    )].sort((a, b) => a - b);
 
     const authorizations = service.requires_authorization
       ? ctx.authorizationsFor(options.patient_id, serviceId).filter((a) => a.status === "ACTIVE")
@@ -128,11 +166,10 @@ export function generateCandidates(
     if (authorizations.length === 0) continue; // nothing to bill against
 
     for (const provider of ctx.eligibleProviders(serviceId)) {
-      const windows = ctx.meetingWindows(options.patient_id, provider.id, serviceId);
+      const windows = ctx
+        .meetingWindows(options.patient_id, provider.id, serviceId)
+        .sort((a, b) => a.startSlot - b.startSlot || a.endSlot - b.endSlot);
       if (windows.length === 0) continue;
-
-      const locationId = provider.home_location_id;
-      const resourceIds = requiredResourcesFor(ctx, serviceId, locationId);
 
       for (const authorization of authorizations) {
         for (const durationMinutes of durations) {
@@ -149,7 +186,15 @@ export function generateCandidates(
                 endSlot: startSlot + durationSlots,
               };
 
-              const proposal: ProposedBooking = {
+              for (const locationId of ctx.providerLocationsForRange(provider.id, range)) {
+                const resourceKey = `${serviceId}:${locationId ?? "no-location"}`;
+                let resourceChoices = resourceChoiceCache.get(resourceKey);
+                if (!resourceChoices) {
+                  resourceChoices = resourceChoicesFor(ctx, serviceId, locationId, false);
+                  resourceChoiceCache.set(resourceKey, resourceChoices);
+                }
+                for (const resourceIds of resourceChoices) {
+                const proposal: ProposedBooking = {
                 patient_id: options.patient_id,
                 service_id: serviceId,
                 provider_id: provider.id,
@@ -158,27 +203,37 @@ export function generateCandidates(
                 resource_ids: resourceIds,
                 range,
                 telehealth: false,
-              };
+                };
 
-              const { valid, violations } = evaluateBooking(proposal, ctx, {
+                const { valid, violations } = evaluateBooking(proposal, ctx, {
                 travel: options.travel,
                 includeSoft: false,
                 // Existing appointments are candidates in their own right, so
-                // a new candidate is allowed to occupy their time — the solver
-                // decides which of the two survives.
-                ignoreAppointmentIds: [...existingIds],
-              });
+                // a new candidate is allowed to occupy their time — plan
+                // search decides which of the two survives.
+                ignoreAppointmentIds: existingIds,
+                stopAfterFirstHard: true,
+                });
 
-              if (!valid) {
-                rejected += 1;
-                const code = violations.find((v) => v.severity === "HARD")?.code;
-                if (code) rejectionsByCode[code] = (rejectionsByCode[code] ?? 0) + 1;
-                continue;
-              }
+                if (!valid) {
+                  rejected += 1;
+                  const code = violations.find((v) => v.severity === "HARD")?.code;
+                  if (code) rejectionsByCode[code] = (rejectionsByCode[code] ?? 0) + 1;
+                  continue;
+                }
 
-              candidates.push(
-                toCandidate(ctx, {
-                  id: `new:${serviceId}:${provider.id}:${startSlot}:${durationSlots}`,
+                candidates.push(
+                  toCandidate(ctx, {
+                  id: [
+                    "new",
+                    serviceId,
+                    provider.id,
+                    authorization?.id ?? "no-auth",
+                    locationId ?? "no-location",
+                    [...resourceIds].sort().join(",") || "no-resource",
+                    startSlot,
+                    durationSlots,
+                  ].join(":"),
                   patient_id: options.patient_id,
                   service_id: serviceId,
                   provider_id: provider.id,
@@ -189,12 +244,15 @@ export function generateCandidates(
                   is_existing: false,
                   flexibility: "FLEXIBLE",
                   target_service_id: options.target_service_id,
-                }),
-              );
+                  ...objectiveFlags(serviceId, provider.id),
+                  }),
+                );
 
-              if (candidates.length >= maxCandidates) {
-                truncated = true;
-                break outer;
+                if (candidates.length >= maxCandidates) {
+                  truncated = true;
+                  break outer;
+                }
+                }
               }
             }
           }
@@ -224,19 +282,31 @@ function defaultServiceIds(ctx: ScheduleContext, patientId: UUID): UUID[] {
   return [...ids];
 }
 
-function requiredResourcesFor(
+/** Return every legal one-of room/resource choice at the selected location. */
+export function resourceChoicesFor(
   ctx: ScheduleContext,
   serviceId: UUID,
   locationId: UUID | null,
-): UUID[] {
+  telehealth = false,
+): UUID[][] {
+  if (telehealth) return [[]];
   const required = (ctx.serviceResources.get(serviceId) ?? []).filter((r) => r.required);
-  if (required.length === 0) return [];
+  if (required.length === 0) return [[]];
 
-  const atLocation = required.find((link) => {
+  const atLocation = required.filter((link) => {
     const resource = ctx.resources.get(link.resource_id);
-    return resource?.active && (!locationId || resource.location_id === locationId);
+    return (
+      resource?.active &&
+      (!locationId || resource.location_id === null || resource.location_id === locationId)
+    );
   });
-  return atLocation ? [atLocation.resource_id] : [required[0].resource_id];
+  // Preserve one invalid option so the rule engine can explain a missing
+  // resource instead of silently producing no candidates.
+  return atLocation.length > 0
+    ? atLocation
+        .sort((a, b) => a.resource_id.localeCompare(b.resource_id))
+        .map((link) => [link.resource_id])
+    : [[]];
 }
 
 function toCandidate(
@@ -253,24 +323,15 @@ function toCandidate(
     is_existing: boolean;
     flexibility: SchedulingFlexibility;
     target_service_id?: UUID;
+    continuity: boolean;
+    preferred: boolean;
   },
 ): CandidateAppointment {
   const requirement = ctx.requirementFor(input.patient_id, input.service_id);
   const durationSlots = input.range.endSlot - input.range.startSlot;
 
   // Values the objective functions will read. Kept as plain numbers so the
-  // solver never has to look anything up again.
-  const incumbentProviders = new Set(
-    (ctx.appointmentsByPatient.get(input.patient_id) ?? [])
-      .filter((a) => a.service_id === input.service_id && a.provider_id)
-      .map((a) => a.provider_id as UUID),
-  );
-  const preferred = (ctx.patientPreferences.get(input.patient_id) ?? []).some(
-    (p) =>
-      (!p.preferred_service_id || p.preferred_service_id === input.service_id) &&
-      p.preferred_provider_id === input.provider_id,
-  );
-
+  // plan search never has to look anything up again.
   return {
     candidate_id: input.id,
     patient_id: input.patient_id,
@@ -290,8 +351,8 @@ function toCandidate(
     objective_values: {
       duration_slots: durationSlots,
       hours: slotsToHours(durationSlots),
-      continuity: incumbentProviders.has(input.provider_id) ? 1 : 0,
-      preferred_provider: preferred ? 1 : 0,
+      continuity: input.continuity ? 1 : 0,
+      preferred_provider: input.preferred ? 1 : 0,
       is_existing: input.is_existing ? 1 : 0,
       minutes: durationSlots * SLOT_MINUTES,
     },

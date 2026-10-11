@@ -76,14 +76,13 @@ export function OversightOverview({
           title="Audit trail"
           sub={
             auditEntries === 0
-              ? "No entries yet — nothing in this build writes"
+              ? "No audit entries have been recorded yet"
               : `${auditEntries} entries`
           }
         />
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ink-secondary)]">
-          Every schedule change will record who made it, what it replaced, and
-          the reason given for any override. Phase 1 makes no changes, so the
-          table is genuinely empty rather than seeded with examples.
+          Schedule, authorization, clinical, credential, and optimization
+          changes record who acted, what changed, and the reason provided.
         </p>
         <Link
           href="/audit"
@@ -118,8 +117,8 @@ export function OversightOverview({
         </ul>
         <p className="mt-4 text-xs leading-relaxed text-[var(--ink-muted)]">
           Read-only oversight is only meaningful if it is genuinely read-only.
-          When this reaches a database, the same boundary is enforced again in
-          Postgres row-level security rather than in the page.
+          The same boundary is enforced in Postgres row-level security, not
+          only in this page.
         </p>
       </Card>
     </div>

@@ -67,7 +67,12 @@ export async function POST(request: NextRequest) {
   const startDate = startOfWeek(start, timeZone);
 
   const started = Date.now();
-  const { ctx, synthetic } = await loadHorizon({ startDate, dayCount: 7, timeZone });
+  const { ctx, synthetic } = await loadHorizon({
+    startDate,
+    dayCount: 7,
+    timeZone,
+    includeOpaqueBusy: true,
+  });
 
   const range = ctx.grid.rangeOf(start, end);
   if (!range) {
