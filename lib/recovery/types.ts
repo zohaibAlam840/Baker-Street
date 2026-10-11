@@ -29,6 +29,8 @@ export interface ScheduleRecoveryOptions {
   start_step_slots?: number;
   /** Deterministic bound passed to candidate generation. */
   max_candidates_per_appointment?: number;
+  /** Do not offer a replacement beginning before this instant. */
+  not_before?: Date;
   travel?: TravelModel;
 }
 

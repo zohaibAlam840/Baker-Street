@@ -216,6 +216,19 @@ export interface ProviderAvailability {
   effective_end: DateOnly | null;
 }
 
+/**
+ * A dated operational outage for one provider. Unlike recurring availability,
+ * this is an absolute interval so callouts spanning midnight or a DST change
+ * cannot be flattened into an incorrect weekday/time rule.
+ */
+export interface ProviderDisruption {
+  id: UUID;
+  provider_id: UUID;
+  starts_at: Timestamp;
+  ends_at: Timestamp;
+  status: "OPEN" | "RESOLVED" | "CANCELLED" | "WITHDRAWN";
+}
+
 export interface PatientAvailability {
   id: UUID;
   patient_id: UUID;

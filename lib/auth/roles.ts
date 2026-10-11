@@ -43,6 +43,15 @@ export type Permission =
   // Availability
   | "availability.manage"
   | "availability.request"
+  // Schedule recovery
+  | "recovery.view"
+  | "recovery.manage"
+  | "recovery.report_own"
+  | "recovery.offer"
+  // Patient and guardian communications
+  | "communications.view"
+  | "communications.manage"
+  | "communications.queue"
   // Configuration
   | "config.services"
   | "config.resources"
@@ -96,6 +105,12 @@ export const ROLE_DEFINITIONS: Record<Role, RoleDefinition> = {
       "schedule.reject",
       "schedule.override",
       "availability.manage",
+      "recovery.view",
+      "recovery.manage",
+      "recovery.offer",
+      "communications.view",
+      "communications.manage",
+      "communications.queue",
       "analytics.capacity",
     ],
   },
@@ -120,6 +135,10 @@ export const ROLE_DEFINITIONS: Record<Role, RoleDefinition> = {
       "schedule.approve_reduction",
       "schedule.reject",
       "schedule.override",
+      "recovery.view",
+      "recovery.manage",
+      "recovery.offer",
+      "communications.view",
       "clinical.set_requirements",
       "credentials.manage",
       "analytics.capacity",
@@ -142,6 +161,7 @@ export const ROLE_DEFINITIONS: Record<Role, RoleDefinition> = {
       "schedule.check_conflict",
       "schedule.search_availability",
       "availability.request",
+      "recovery.report_own",
     ],
   },
 
@@ -261,6 +281,22 @@ export const NAV_ITEMS: readonly NavItem[] = [
     requires: ["view.patient_schedule", "view.provider_schedule"],
     description: "Patient and provider weeks",
     icon: "calendar",
+  },
+  {
+    href: "/recovery",
+    label: "Schedule recovery",
+    short: "Recovery",
+    requires: ["recovery.view", "recovery.report_own"],
+    description: "Callouts, cancellations and replacement care",
+    icon: "clipboard",
+  },
+  {
+    href: "/communications",
+    label: "Communications",
+    short: "Messages",
+    requires: ["communications.view"],
+    description: "Reminder delivery, consent and retries",
+    icon: "clipboard",
   },
   {
     href: "/search",
@@ -406,5 +442,26 @@ export function navFor(role: Role | null): NavItem[] {
  * the labels truncate and the targets get too narrow to hit reliably.
  */
 export function primaryNavFor(role: Role | null): NavItem[] {
-  return navFor(role).slice(0, 4);
+  const preferredHrefs: Record<Role, readonly string[]> = {
+    SCHEDULER: ["/dashboard", "/schedule", "/recovery", "/communications"],
+    CLINICAL: ["/dashboard", "/schedule", "/recovery", "/patients"],
+    PROVIDER: ["/dashboard", "/schedule", "/recovery", "/notifications"],
+    AUTHORIZATION: ["/dashboard", "/schedule", "/authorizations", "/notifications"],
+    OPERATIONS: ["/dashboard", "/schedule", "/capacity", "/reports"],
+    ADMIN: ["/dashboard", "/configuration", "/audit", "/settings"],
+    COMPLIANCE: ["/dashboard", "/audit", "/notifications", "/settings"],
+  };
+  const allowed = new Map(navFor(role).map((item) => [item.href, item]));
+  const hrefs = role
+    ? preferredHrefs[role]
+    : ["/dashboard", "/notifications", "/settings"];
+
+  return hrefs.flatMap((href) => {
+    const item = allowed.get(href);
+    if (!item) return [];
+    if (role === "PROVIDER" && href === "/recovery") {
+      return [{ ...item, short: "Report" }];
+    }
+    return [item];
+  });
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { can, type Permission } from "@/lib/auth/roles";
 import { requireSession } from "@/lib/auth/session";
+import { reconcileAppointmentReminders } from "@/lib/communications/reconcile";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { addDays, parseZonedDateTimeLocal, startOfWeek } from "@/lib/domain/time";
 import type { CandidateAppointment } from "@/lib/domain/types";
@@ -143,15 +144,19 @@ export async function createAppointment(form: FormData) {
   if (appointmentIds.length !== rows.length) {
     fail(returnPath, "The booking transaction did not return every appointment. No partial series was accepted.");
   }
+  if (session.role === "SCHEDULER") {
+    await reconcileAppointmentReminders(supabase, appointmentIds);
+  }
   revalidatePath("/schedule"); revalidatePath("/dashboard");
   done(`/appointments/${appointmentIds[0]}`, repeats > 1 ? `${repeats} recurring appointments booked.` : "Appointment booked.");
 }
 
 export async function updateAppointment(form: FormData) {
-  const { supabase } = await authorized("schedule.book");
+  const { session, supabase } = await authorized("schedule.book");
   const id = value(form, "appointment_id"); const path = `/appointments/${id}`;
   const { data: existing } = await supabase.from("appointments").select("*, patients!inner(timezone)").eq("id",id).single();
   if (!existing) fail(path,"Appointment no longer exists.");
+  if (!["SCHEDULED","CONFIRMED"].includes(existing.status)) fail(path,"Only scheduled or confirmed visits can be edited. Completed, cancelled, and no-show visits are read-only.");
   const timeZone = (existing.patients as {timezone?:string}|null)?.timezone ?? process.env.SCHEDULING_TIMEZONE ?? "America/New_York";
   const parsedStart = parseZonedDateTimeLocal(value(form,"start_time"),timeZone);
   const parsedEnd = parseZonedDateTimeLocal(value(form,"end_time"),timeZone);
@@ -167,6 +172,7 @@ export async function updateAppointment(form: FormData) {
   const existingResourceIds=(resourceLinks??[]).map(row=>row.resource_id);
   const providerId=nullable(form,"provider_id"), locationId=nullable(form,"location_id");
   const status=value(form,"status");
+  if(!["SCHEDULED","CONFIRMED","COMPLETED"].includes(status)) fail(path,"Choose a valid appointment status.");
   const statusOnlyCompletion=status==="COMPLETED"&&["SCHEDULED","CONFIRMED"].includes(existing.status)
     &&providerId===existing.provider_id&&locationId===existing.location_id
     &&start.getTime()===new Date(existing.start_time).getTime()
@@ -188,21 +194,10 @@ export async function updateAppointment(form: FormData) {
     p_flexibility:flexibility,p_resource_ids:resourceIds,p_reason:reason,
   });
   if (error) fail(path, explainDatabaseError(error.message));
+  if (session.role === "SCHEDULER") {
+    await reconcileAppointmentReminders(supabase, [id]);
+  }
   revalidatePath(path); revalidatePath("/schedule"); done(path, "Appointment updated and audited.");
-}
-
-export async function cancelAppointment(form: FormData) {
-  const { supabase } = await authorized("schedule.book");
-  const id=value(form,"appointment_id"), reason=value(form,"reason"), path=`/appointments/${id}`;
-  if (reason.length < 3) fail(path, "Enter a cancellation reason.");
-  const { error } = await supabase.from("appointments").update({ status:"CANCELLED", cancellation_reason:reason }).eq("id",id);
-  if (error) fail(path,error.message); revalidatePath("/schedule"); done(path,"Appointment cancelled. Its history is preserved.");
-}
-
-export async function restoreAppointment(form: FormData) {
-  const { supabase } = await authorized("schedule.book"); const id=value(form,"appointment_id"), path=`/appointments/${id}`;
-  const { error }=await supabase.from("appointments").update({status:"SCHEDULED",cancellation_reason:null}).eq("id",id);
-  if(error) fail(path,explainDatabaseError(error.message)); revalidatePath("/schedule"); done(path,"Appointment restored.");
 }
 
 export async function updateClinicalRequirement(form: FormData) {
@@ -252,8 +247,6 @@ export async function createProvider(form: FormData) {
   revalidatePath("/providers"); done(`/providers/${data!.id}`,"Clinician created and audited.");
 }
 
-export async function addPatientContact(form:FormData){const{supabase}=await authorized("schedule.book");const patient=value(form,"patient_id"),path=`/patients/${patient}`;const name=value(form,"name");if(!name)fail(path,"Contact name is required.");const{error}=await supabase.from("patient_contacts").insert({patient_id:patient,name,relationship:value(form,"relationship")||"Caregiver",phone:nullable(form,"phone"),email:nullable(form,"email"),is_primary:checked(form,"is_primary"),authorized_to_receive_information:checked(form,"authorized")});if(error)fail(path,error.message);revalidatePath(path);done(path,"Contact added.");}
-
 export async function addProviderCredential(form:FormData){const{supabase}=await authorized("credentials.manage");const provider=value(form,"provider_id"),path=`/providers/${provider}`;const credential=value(form,"credential_type");if(!credential)fail(path,"Credential type is required.");const{error}=await supabase.from("provider_credentials").insert({provider_id:provider,credential_type:credential,credential_number:nullable(form,"credential_number"),state:nullable(form,"state"),issue_date:nullable(form,"issue_date"),expiration_date:nullable(form,"expiration_date"),status:value(form,"status")||"ACTIVE"});if(error)fail(path,error.message);revalidatePath(path);done(path,"Credential added and audited.");}
 
 export async function addSupervisionRelationship(form:FormData){const{supabase}=await authorized("credentials.manage");const supervisee=value(form,"supervisee_id"),path=`/providers/${supervisee}`,supervisor=value(form,"supervisor_id");if(!supervisor||supervisor===supervisee)fail(path,"Choose a different supervisor.");const{error}=await supabase.from("provider_supervision").insert({supervisor_id:supervisor,supervisee_id:supervisee,effective_start:value(form,"effective_start")||new Date().toISOString().slice(0,10)});if(error)fail(path,error.code==="23505"?"This supervision relationship is already active.":error.message);revalidatePath(path);done(path,"Supervisor assigned.");}
@@ -266,5 +259,8 @@ export async function toggleIntakeTask(form: FormData) {
 
 export async function markNotificationRead(form: FormData) {
   await requireSession(); const supabase=await createClient(); const id=value(form,"notification_id");
-  await supabase.from("notifications").update({read_at:new Date().toISOString()}).eq("id",id); revalidatePath("/notifications");
+  if(!id) fail("/notifications","The task could not be identified.");
+  const {error}=await supabase.rpc("mark_notification_read",{p_notification_id:id});
+  if(error) fail("/notifications","The task could not be marked read. Try again.");
+  revalidatePath("/notifications"); done("/notifications","Task marked read.");
 }

@@ -139,6 +139,9 @@ otherwise.**
 | Check conflict | ✓ | ✓ | ✓ | — | ✓ | — | — |
 | Search availability | ✓ | ✓ | ~1 | — | ✓ | — | — |
 | Book / move / cancel | ✓ | ✓ | — | — | — | — | — |
+| Manage contacts and consent | ✓ | — | — | — | — | — | — |
+| View communications | ✓ | ~1 | — | — | aggregate only | — | sanitized events |
+| Queue / retry / cancel messages | ✓ | — | — | — | — | — | — |
 | Run optimization | ✓ | ✓ | — | — | ~3 | — | — |
 | **Approve result** | ~4 | ✓ | — | — | — | — | — |
 | **Reject result** | ✓ | ✓ | — | — | — | — | — |

@@ -46,6 +46,8 @@ export interface CandidateOptions {
   includeExisting?: boolean;
   /** Safety valve. Generation stops here and reports `truncated`. */
   maxCandidates?: number;
+  /** Earliest slot to enumerate. Applied before the candidate safety valve. */
+  minimumStartSlot?: number;
   travel?: TravelModel;
 }
 
@@ -69,6 +71,10 @@ export function generateCandidates(
   const started = Date.now();
   const step = Math.max(1, options.startStepSlots ?? 1);
   const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+  const minimumStartSlot = Math.max(0, Math.min(
+    ctx.grid.totalSlots,
+    Math.ceil(options.minimumStartSlot ?? 0),
+  ));
   const includeExisting = options.includeExisting ?? true;
 
   const candidates: CandidateAppointment[] = [];
@@ -176,8 +182,11 @@ export function generateCandidates(
           const durationSlots = minutesToSlots(durationMinutes);
 
           for (const window of windows) {
+            const firstStart = window.startSlot + Math.ceil(
+              Math.max(0, minimumStartSlot - window.startSlot) / step,
+            ) * step;
             for (
-              let startSlot = window.startSlot;
+              let startSlot = firstStart;
               startSlot + durationSlots <= window.endSlot;
               startSlot += step
             ) {

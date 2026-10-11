@@ -15,6 +15,10 @@ patient and staff records they need.
   staff profiles.
 - Patient, provider, care-team, authorization, availability, appointment,
   resource, audit, work-queue, and reporting workflows.
+- Consent-aware patient and guardian contacts, appointment reminders, recovery
+  outreach, delivery-state tracking, retries, opt-outs, and a mobile-first
+  communications queue. Delivery remains in record-only mode until an approved
+  email/SMS provider worker is configured.
 - Ranked availability and conflict checks backed by the same scheduling rules.
 - A focused single-service Fill Service analysis with honest lower and upper
   bounds.
@@ -58,7 +62,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 
 Apply every migration under `supabase/migrations` in order. Do not install only
 the original schema: later migrations add authentication profiles, care-team
-RLS, operational workflows, push subscriptions, and atomic optimizer approval.
+RLS, operational workflows, push subscriptions, schedule recovery,
+communications, and atomic optimizer approval.
 The service-role key is server-only and is needed only for controlled seed or
 administrative jobs; ordinary page reads use the signed-in user's session.
 
@@ -77,6 +82,7 @@ npm.cmd run typecheck
 npm.cmd test
 npx.cmd supabase test db --linked
 npm.cmd run build
+npm.cmd run verify:role-access
 ```
 
 The database access suite verifies the seven roles and should be run against a
@@ -88,6 +94,7 @@ for release, rollback, monitoring, and post-deployment checks.
 - [Scheduling engine](docs/ENGINE.md)
 - [Roles and permissions](docs/ROLES_AND_PERMISSIONS.md)
 - [Client demonstration guide](docs/CLIENT_DEMO.md)
+- [Communications and consent](docs/COMMUNICATIONS.md)
 - [Production runbook](docs/PRODUCTION_RUNBOOK.md)
 
 ## Safety model

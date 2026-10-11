@@ -26,6 +26,7 @@ npm.cmd test
 npx.cmd supabase db push --linked --dry-run
 npx.cmd supabase test db --linked
 npm.cmd run build
+npm.cmd run verify:role-access
 ```
 
 Review the dry-run migration list before applying it. Deploy every file under
@@ -39,6 +40,24 @@ The repository includes `Quality and security` and manually approved `Deploy pro
 After deployment, run `DEPLOYMENT_URL=https://example.org npm run verify:deployment`. It verifies database health, the login route, and required security headers.
 
 The deployment platform should poll `GET /api/health`. A `503` means the application cannot reach Supabase Auth or the database does not expose the required schema version, so that release should not receive traffic.
+
+## Communications release checks
+
+New environments begin in `RECORD_ONLY` delivery mode. Keep that mode for the
+first release and verify contact authorization, relationship dates, consent,
+quiet hours, appointment/recovery source versions, role scoping, cancellation,
+and retry behavior before connecting a provider.
+
+The external worker must use only the service-role communication RPCs. Claim an
+opaque lease, call the prepare RPC immediately before sending, hash the
+destination in attempt records, and record outcomes and provider receipts by
+their idempotent IDs. Never log message bodies or destinations. Validate the
+provider's webhook signature before calling the receipt RPC. A delayed failure
+must never overwrite a delivered state; an opt-out or complaint must revoke the
+channel and cancel future actionable jobs.
+
+Run the seven-role read-only verification after applying the migration. Run the
+full pgTAP suite and mutation scenarios against staging, not production.
 
 ## Optimizer and atomic-approval release checks
 

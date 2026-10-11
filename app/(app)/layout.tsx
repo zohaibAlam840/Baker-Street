@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { AssistantWidget } from "@/components/shell/AssistantWidget";
 import { BottomNav, SidebarNav } from "@/components/shell/Nav";
-import { NotificationsMenu } from "@/components/shell/NotificationsMenu";
+import { NotificationsMenu, type AssignedNotification } from "@/components/shell/NotificationsMenu";
 import {
   IconArrowUpRight,
   IconChart,
@@ -19,6 +19,7 @@ import { loadHorizon } from "@/lib/data/snapshot";
 import { formatDateOnly } from "@/lib/domain/time";
 import { buildAlerts, groupAlerts, scopeAlerts } from "@/lib/scheduling/alerts";
 import { defaultWeekStart, demoToday } from "@/lib/scheduling/defaults";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * The signed-in shell.
@@ -40,6 +41,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // the current snapshot on each request, then narrowed to what this role
   // may see — the same scoping the dashboard uses.
   let alerts: ReturnType<typeof groupAlerts> = [];
+  const assignedTasks: AssignedNotification[] = [];
   try {
     const { ctx } = await loadHorizon({ startDate: defaultWeekStart() });
     alerts = groupAlerts(
@@ -54,6 +56,38 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     // A work-queue read must never take down navigation, settings, or audit.
     // The destination pages still surface their own load errors with a digest.
     console.error("Unable to build shell alerts", error);
+  }
+  try {
+    const supabase = await createClient();
+    const batchSize = 50;
+    const maxScan = 250;
+    for (let offset = 0; offset < maxScan && assignedTasks.length < 5; offset += batchSize) {
+      const { data: notifications, error: notificationError } = await supabase
+        .from("notifications")
+        .select("id,title,body,href,severity,user_id,read_at")
+        .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + batchSize - 1);
+      if (notificationError) throw notificationError;
+      const batch = notifications ?? [];
+      const ids = batch.map((item) => item.id);
+      const receipts = ids.length
+        ? await supabase
+            .from("notification_receipts")
+            .select("notification_id")
+            .eq("user_id", session.userId)
+            .in("notification_id", ids)
+        : { data: [], error: null };
+      if (receipts.error) throw receipts.error;
+      const read = new Set((receipts.data ?? []).map((receipt) => receipt.notification_id));
+      assignedTasks.push(...batch.filter((item) =>
+        !read.has(item.id) && !(item.user_id === session.userId && item.read_at),
+      ).slice(0, 5 - assignedTasks.length));
+      if (batch.length < batchSize) break;
+    }
+  } catch (error) {
+    // Assigned tasks enhance the shell; the full work queue reports read errors.
+    console.error("Unable to load shell tasks", error);
   }
   const dateLabel = today.toLocaleDateString("en-US", {
     month: "long",
@@ -150,7 +184,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               )}
 
               <div className="ml-auto flex items-center gap-2">
-                <NotificationsMenu alerts={alerts} />
+                <NotificationsMenu alerts={alerts} tasks={assignedTasks} />
 
                 {can(session.role, "view.patient_schedule") && (
                 <Link
@@ -193,7 +227,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          {/* Environment banner keeps synthetic scheduling data unmistakable. */}
+          {/* A source-neutral reminder of the access and safety boundary. */}
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl bg-[var(--surface-sunken)] px-3 py-2 lg:mx-6">
             <span
               aria-hidden
@@ -201,7 +235,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               style={{ background: "var(--status-warning)" }}
             />
             <p className="text-[0.6875rem] leading-tight text-[var(--ink-secondary)]">
-              Supabase Auth · administrator-approved roles · synthetic scheduling data locally.
+              Authenticated workspace · role-based access · scheduling constraints checked before changes.
             </p>
           </div>
 

@@ -70,7 +70,7 @@ export default async function ApprovalsPage({
             continuity, visit count, preferences, authorization, staff, rooms, and travel.
           </p>
           <p className="mt-2 text-xs font-medium text-[var(--ink-muted)]">
-            Week {weekLabel} Â· {ctx.grid.timeZone}
+            Week {weekLabel} · {ctx.grid.timeZone}
           </p>
         </div>
         <Link
@@ -222,7 +222,7 @@ export default async function ApprovalsPage({
                             {metric.service_name}
                           </span>
                           <span className="mt-0.5 block tabular-nums text-[var(--ink-secondary)]">
-                            {metric.current_hours}h current â†’ {metric.projected_hours}h projected Â· {metric.target_hours}h target
+                            {metric.current_hours}h current → {metric.projected_hours}h projected · {metric.target_hours}h target
                           </span>
                         </li>
                       ))}

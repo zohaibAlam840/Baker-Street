@@ -318,7 +318,11 @@ export default async function ProviderDetailPage({
 
         <Card>
           <CardHeader title="Working hours" sub="What the engine treats as bookable" />
-          <Link href={`/providers/${provider.id}/availability?week=${ctx.grid.startDate}`} className="mt-3 inline-block text-xs underline underline-offset-4">Manage availability and PTO</Link>
+          {(can(session.role, "availability.manage") || (can(session.role, "availability.request") && session.providerId === provider.id)) && (
+            <Link href={`/providers/${provider.id}/availability?week=${ctx.grid.startDate}`} className="mt-3 inline-block text-xs underline underline-offset-4">
+              {can(session.role, "availability.manage") ? "Review availability and callouts" : "Report my callout"}
+            </Link>
+          )}
           <ul className="mt-3 divide-y divide-[var(--rule-hairline)]">
             {week7.map((day) => (
               <li key={day.day} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2.5">

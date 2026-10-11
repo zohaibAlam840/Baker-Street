@@ -1,14 +1,79 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+
 import { Card, CardHeader } from "@/components/charts";
-import { Field, PrototypeForm, ReadinessNotice, inputClass } from "@/components/forms/PrototypeForm";
-import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/auth/roles";
+import { requireSession } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
 
 export const dynamic = "force-dynamic";
-const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-export default async function ProviderAvailabilityPage({ params, searchParams }: { params: Promise<{ providerId: string }>; searchParams: Promise<{ week?: string }> }) {
-  await requirePermission("availability.manage"); const [{ providerId }, query] = await Promise.all([params, searchParams]); const { ctx } = await loadHorizon({ startDate: query.week ?? defaultWeekStart() }); const provider = ctx.providers.get(providerId); if (!provider) notFound(); const rows = ctx.rows.providerAvailability.filter((r) => r.provider_id === providerId);
-  return <div className="space-y-5"><div><Link href={`/providers/${providerId}?week=${ctx.grid.startDate}`} className="text-xs underline underline-offset-4 text-[var(--ink-secondary)]">← Clinician record</Link><h1 className="mt-2 text-xl font-semibold text-[var(--ink-primary)]">{provider.first_name} {provider.last_name} · availability</h1><p className="mt-1 text-sm text-[var(--ink-secondary)]">Recurring clinical hours, administrative time, exceptions, and PTO.</p></div><ReadinessNotice>Updates will require overlap validation and audit logging before they affect bookability.</ReadinessNotice><Card><CardHeader title="Recurring weekly hours" /><div className="mt-4 space-y-3">{rows.map((row) => <div key={row.id} className="grid gap-2 rounded-lg border border-[var(--rule-hairline)] p-3 sm:grid-cols-[1fr_1fr_1fr_1fr]"><span className="text-sm font-medium">{days[row.day_of_week]}</span><span className="text-sm text-[var(--ink-secondary)]">{row.start_time.slice(0,5)}–{row.end_time.slice(0,5)}</span><span className="text-sm text-[var(--ink-secondary)]">{row.availability_type}</span><span className="text-sm text-[var(--ink-secondary)]">{row.location_id ? ctx.locations.get(row.location_id)?.name : "Any location"}</span></div>)}</div></Card><Card><CardHeader title="Add an exception or PTO" /><div className="mt-5"><PrototypeForm label="Review availability change"><div className="grid gap-4 sm:grid-cols-2"><Field label="Type"><select className={inputClass}>{["CLINICAL","ADMINISTRATIVE","PREFERRED","HARD_UNAVAILABLE","PTO"].map(v => <option key={v}>{v}</option>)}</select></Field><Field label="Date"><input type="date" className={inputClass} /></Field><Field label="Start"><input type="time" className={inputClass} /></Field><Field label="End"><input type="time" className={inputClass} /></Field><Field label="Location"><select className={inputClass}><option value="">Any location</option>{[...ctx.locations.values()].map(l => <option key={l.id}>{l.name}</option>)}</select></Field><Field label="Reason"><input className={inputClass} placeholder="PTO, training, coverage…" /></Field></div></PrototypeForm></div></Card></div>;
+
+const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export default async function ProviderAvailabilityPage({ params, searchParams }: {
+  params: Promise<{ providerId: string }>;
+  searchParams: Promise<{ week?: string }>;
+}) {
+  const [session, { providerId }, query] = await Promise.all([
+    requireSession(),
+    params,
+    searchParams,
+  ]);
+  const canManage = can(session.role, "availability.manage");
+  const canRequestOwn = can(session.role, "availability.request")
+    && session.providerId === providerId;
+  if (!canManage && !canRequestOwn) {
+    redirect("/no-access?permission=availability.request");
+  }
+
+  const { ctx } = await loadHorizon({ startDate: query.week ?? defaultWeekStart() });
+  const provider = ctx.providers.get(providerId);
+  if (!provider) notFound();
+  const rows = ctx.rows.providerAvailability.filter((row) => row.provider_id === providerId);
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <Link href={`/providers/${providerId}?week=${ctx.grid.startDate}`} className="text-xs text-[var(--ink-secondary)] underline underline-offset-4">← Clinician record</Link>
+        <h1 className="mt-2 text-xl font-semibold text-[var(--ink-primary)]">{provider.first_name} {provider.last_name} · availability</h1>
+        <p className="mt-1 text-sm text-[var(--ink-secondary)]">Recurring clinical hours are shown below. Dated callouts and absences are handled through schedule recovery.</p>
+      </div>
+
+      <Card>
+        <CardHeader title="Recurring weekly hours" sub="Read-only availability pattern" />
+        <div className="mt-4 space-y-3">
+          {rows.map((row) => (
+            <div key={row.id} className="grid gap-2 rounded-lg border border-[var(--rule-hairline)] p-3 sm:grid-cols-[1fr_1fr_1fr_1fr]">
+              <span className="text-sm font-medium">{days[row.day_of_week]}</span>
+              <span className="text-sm text-[var(--ink-secondary)]">{row.start_time.slice(0, 5)}–{row.end_time.slice(0, 5)}</span>
+              <span className="text-sm text-[var(--ink-secondary)]">{row.availability_type}</span>
+              <span className="text-sm text-[var(--ink-secondary)]">{row.location_id ? ctx.locations.get(row.location_id)?.name : "Any location"}</span>
+            </div>
+          ))}
+          {!rows.length && (
+            <p className="rounded-xl bg-[var(--surface-sunken)] p-4 text-sm text-[var(--ink-secondary)]">No recurring availability has been recorded for this clinician.</p>
+          )}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title={canRequestOwn && !canManage ? "Need to report a callout?" : "Manage a dated callout"}
+          sub="Recovery safely handles affected visits and replacement work"
+        />
+        <p className="mt-4 text-sm leading-6 text-[var(--ink-secondary)]">
+          {canRequestOwn && !canManage
+            ? "Report your own absence with its exact dates and times. Scheduling staff will receive the affected visits without exposing other clinicians' caseloads."
+            : "Open schedule recovery to record an absence for this or another clinician and move affected visits into the recovery queue."}
+        </p>
+        <Link
+          href="/recovery"
+          className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[var(--brand)] px-5 text-center text-sm font-medium text-white sm:w-auto"
+        >
+          {canRequestOwn && !canManage ? "Report my callout" : "Open schedule recovery"}
+        </Link>
+      </Card>
+    </div>
+  );
 }

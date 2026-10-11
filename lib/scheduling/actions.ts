@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requirePermission } from "@/lib/auth/session";
+import { reconcileUpcomingAppointmentReminders } from "@/lib/communications/reconcile";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { addDays } from "@/lib/domain/time";
 import { FlatTravelModel } from "@/lib/rules/travel";
@@ -135,6 +136,9 @@ export async function approveOptimizationPlan(form: FormData) {
         `${friendlyApprovalError(error.message)} No appointments were changed.`,
       ),
     );
+  }
+  if (session.role === "SCHEDULER") {
+    await reconcileUpcomingAppointmentReminders(supabase);
   }
 
   revalidatePath("/dashboard");

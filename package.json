@@ -11,6 +11,8 @@
     "test:watch": "vitest",
     "seed:users": "tsx scripts/seed-auth-users.ts",
     "verify:deployment": "tsx scripts/verify-deployment.ts",
+    "verify:role-access": "tsx --env-file=.env --env-file=.env.local scripts/verify-recovery-access.ts",
+    "verify:recovery-access": "tsx --env-file=.env --env-file=.env.local scripts/verify-recovery-access.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

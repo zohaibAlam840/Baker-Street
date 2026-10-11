@@ -237,11 +237,15 @@ Two, both on the dashboard:
 The pattern in both: least privilege has to hold on the landing screen, not
 only on the pages behind a permission check.
 
-## Email and notifications: what actually exists
+## Communications and notifications: what actually exists
 
-There is still no transactional email provider or appointment-reminder email
-workflow. Supabase Auth may send its own confirmation/reset messages when that
-feature is enabled, but the application does not send clinical email.
+The application now records verified patient/guardian contacts, channel-level
+consent, appointment reminders, recovery outreach, delivery attempts, receipts,
+retries, and opt-outs. The communications queue is RLS-scoped and designed for
+mobile use. It starts in **record-only mode**: staff can safely exercise the
+whole workflow, but no clinical SMS or email leaves the system until an approved
+provider worker is configured. Supabase Auth may separately send its own
+password-reset messages.
 
 The application does include an RLS-scoped work queue and optional Web Push:
 
@@ -253,7 +257,7 @@ The application does include an RLS-scoped work queue and optional Web Push:
 - Lock-screen payloads are deliberately generic and contain no patient name,
   diagnosis, authorization number, service, or appointment details.
 
-### To add email later
+### To enable live delivery later
 
 1. An account with a provider (Resend, Postmark, SES).
 2. A verified sending domain with SPF, DKIM and DMARC — mail from an
@@ -261,7 +265,9 @@ The application does include an RLS-scoped work queue and optional Web Push:
 3. **A signed business associate agreement**, and a rule that appointment
    details never appear in the body. A reminder saying "you have an
    appointment on Tuesday" is fine; one naming the service is a disclosure.
-4. An unsubscribe path and a record of consent per recipient.
+4. Provider webhooks connected to the service-role receipt RPC. Channel consent,
+   STOP/unsubscribe handling, hard-bounce revocation, quiet hours, retry limits,
+   and minimum-necessary message templates are already enforced in Postgres.
 
 ### Work queue behavior
 

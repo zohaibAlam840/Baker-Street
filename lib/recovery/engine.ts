@@ -89,10 +89,11 @@ export function suggestScheduleRecovery(
   const maxCandidates = clampInteger(
     options.max_candidates_per_appointment,
     DEFAULT_MAX_CANDIDATES,
-    maxOptions,
+    1,
     MAX_CANDIDATES,
   );
   const startStepSlots = clampInteger(options.start_step_slots, 1, 1, 16);
+  const minimumStartSlot = recoveryMinimumStartSlot(ctx, options.not_before);
   const recoveries: AffectedAppointmentRecovery[] = [];
 
   for (const appointment of locked) {
@@ -121,10 +122,16 @@ export function suggestScheduleRecovery(
       excludedProviders,
       startStepSlots,
       maxCandidates,
+      minimumStartSlot,
       options.travel,
     );
     const ranked = search.candidates
       .filter((candidate) => !isUnchanged(candidate, appointment))
+      .filter(
+        (candidate) =>
+          !options.not_before ||
+          ctx.grid.instantOf(candidate.range.startSlot).getTime() >= options.not_before.getTime(),
+      )
       .sort((left, right) => compareCandidates(left, right, appointment))
       .slice(0, maxOptions);
     const recoveryOptions = ranked.map((candidate) => toRecoveryOption(ctx, appointment, candidate));
@@ -248,6 +255,7 @@ function findCandidates(
   excludedProviders: ReadonlySet<UUID>,
   startStepSlots: number,
   maxCandidates: number,
+  minimumStartSlot: number,
   travel: ScheduleRecoveryOptions["travel"],
 ): CandidateSearch {
   if (appointment.telehealth) {
@@ -257,23 +265,31 @@ function findCandidates(
       excludedProviders,
       startStepSlots,
       maxCandidates,
+      minimumStartSlot,
       travel,
     );
   }
 
-  const generated = generateCandidates(ctx, {
+  // Exclude unavailable providers before enumeration. Filtering afterward is
+  // unsafe under a candidate cap: an unavailable provider could consume the
+  // entire bound and hide a valid replacement that sorts later.
+  const searchContext = withExcludedProviders(ctx, excludedProviders);
+  // At most one candidate can be the exact unchanged booking. Give generation
+  // one extra position, remove that no-op, then enforce the caller's bound.
+  const generationLimit = Math.min(MAX_CANDIDATES, maxCandidates + 1);
+  const generated = generateCandidates(searchContext, {
     patient_id: appointment.patient_id,
     service_ids: [appointment.service_id],
     durations: [(appointment.range.endSlot - appointment.range.startSlot) * SLOT_MINUTES],
     startStepSlots,
     includeExisting: false,
-    maxCandidates,
+    maxCandidates: generationLimit,
+    minimumStartSlot,
     travel,
   });
 
   return {
     candidates: generated.candidates
-      .filter((candidate) => !excludedProviders.has(candidate.provider_id))
       .map((candidate) => ({
         key: candidate.candidate_id,
         patient_id: candidate.patient_id,
@@ -285,9 +301,24 @@ function findCandidates(
         range: { startSlot: candidate.start_slot, endSlot: candidate.end_slot },
         telehealth: false,
         sourceCandidate: candidate,
-      })),
+      }))
+      .filter((candidate) => !isUnchanged(candidate, appointment))
+      .slice(0, maxCandidates),
     rejections: generated.rejectionsByCode,
   };
+}
+
+function withExcludedProviders(
+  ctx: ScheduleContext,
+  excludedProviders: ReadonlySet<UUID>,
+): ScheduleContext {
+  if (excludedProviders.size === 0) return ctx;
+  return new ScheduleContext(ctx.grid, {
+    ...ctx.rows,
+    providers: ctx.rows.providers.map((provider) =>
+      excludedProviders.has(provider.id) ? { ...provider, status: "ON_LEAVE" as const } : provider,
+    ),
+  });
 }
 
 /** Candidate generation currently enumerates in-person bookings only. */
@@ -297,6 +328,7 @@ function findTelehealthCandidates(
   excludedProviders: ReadonlySet<UUID>,
   startStepSlots: number,
   maxCandidates: number,
+  minimumStartSlot: number,
   travel: ScheduleRecoveryOptions["travel"],
 ): CandidateSearch {
   const duration = appointment.range.endSlot - appointment.range.startSlot;
@@ -316,8 +348,11 @@ function findTelehealthCandidates(
       .sort((a, b) => a.startSlot - b.startSlot || a.endSlot - b.endSlot);
     for (const authorization of authorizations) {
       for (const window of windows) {
+        const firstStart = window.startSlot + Math.ceil(
+          Math.max(0, minimumStartSlot - window.startSlot) / startStepSlots,
+        ) * startStepSlots;
         for (
-          let startSlot = window.startSlot;
+          let startSlot = firstStart;
           startSlot + duration <= window.endSlot;
           startSlot += startStepSlots
         ) {
@@ -343,7 +378,7 @@ function findTelehealthCandidates(
             continue;
           }
 
-          candidates.push({
+          const candidate: InternalCandidate = {
             key: [
               "telehealth",
               appointment.service_id,
@@ -360,7 +395,11 @@ function findTelehealthCandidates(
             resource_ids: [],
             range,
             telehealth: true,
-          });
+          };
+          // A no-op is never a recovery option and must not consume the
+          // deterministic candidate budget.
+          if (isUnchanged(candidate, appointment)) continue;
+          candidates.push(candidate);
           if (candidates.length >= maxCandidates) break outer;
         }
       }
@@ -368,6 +407,12 @@ function findTelehealthCandidates(
   }
 
   return { candidates, rejections };
+}
+
+function recoveryMinimumStartSlot(ctx: ScheduleContext, notBefore?: Date): number {
+  if (!notBefore || notBefore.getTime() <= ctx.grid.dayStart(0).getTime()) return 0;
+  if (notBefore.getTime() >= ctx.grid.horizonEnd().getTime()) return ctx.grid.totalSlots;
+  return ctx.grid.slotCeilOf(notBefore) ?? ctx.grid.totalSlots;
 }
 
 function isUnchanged(candidate: InternalCandidate, appointment: BookedAppointment): boolean {
@@ -464,14 +509,20 @@ function toRecoveryOption(
 }
 
 function optionId(appointmentId: UUID, candidate: InternalCandidate): string {
+  // Every booking field that changes legality or persistence participates in
+  // identity. In particular, two visually identical choices backed by
+  // different authorizations must never share an approval token.
   return [
     "recovery",
     appointmentId,
+    candidate.service_id,
     candidate.provider_id,
+    candidate.authorization_id ?? "no-auth",
     candidate.location_id ?? "remote",
+    candidate.telehealth ? "telehealth" : "in-person",
     candidate.range.startSlot,
     candidate.range.endSlot,
-    candidate.resource_ids.join(",") || "no-resource",
+    [...candidate.resource_ids].sort((a, b) => a.localeCompare(b)).join(",") || "no-resource",
   ].join(":");
 }
 

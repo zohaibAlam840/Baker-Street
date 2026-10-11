@@ -73,6 +73,7 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
     providerServices,
     providerCredentials,
     providerAvailability,
+    providerDisruptions,
     patientAvailability,
     patientRestrictions,
     patientPreferences,
@@ -90,6 +91,14 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
     all<SnapshotRows["providerServices"][number]>("provider_services"),
     all<SnapshotRows["providerCredentials"][number]>("provider_credentials"),
     all<SnapshotRows["providerAvailability"][number]>("provider_availability"),
+    // The RPC returns PHI-free busy intervals even when a clinical user's
+    // caseload RLS does not expose the related recovery case. Without it, a
+    // replacement could be suggested for a clinician who is called out.
+    supabase
+      .rpc("provider_callout_intervals", {
+        p_start: windowStart,
+        p_end: windowEnd,
+      }),
     all<SnapshotRows["patientAvailability"][number]>("patient_availability"),
     all<SnapshotRows["patientRestrictions"][number]>("patient_restrictions"),
     all<SnapshotRows["patientPreferences"][number]>("patient_preferences"),
@@ -105,6 +114,7 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
     ["service_durations", serviceDurations], ["service_resources", serviceResources],
     ["providers", providers], ["provider_services", providerServices],
     ["provider_credentials", providerCredentials], ["provider_availability", providerAvailability],
+    ["provider_callout_intervals", providerDisruptions],
     ["patient_availability", patientAvailability], ["patient_restrictions", patientRestrictions],
     ["patient_preferences", patientPreferences],
     ["patient_service_requirements", patientServiceRequirements],
@@ -179,6 +189,7 @@ export async function loadSnapshotRows(request: HorizonRequest): Promise<Snapsho
     providerServices: providerServices.data ?? [],
     providerCredentials: providerCredentials.data ?? [],
     providerAvailability: providerAvailability.data ?? [],
+    providerDisruptions: (providerDisruptions.data ?? []) as NonNullable<SnapshotRows["providerDisruptions"]>,
     patientAvailability: patientAvailability.data ?? [],
     patientRestrictions: patientRestrictions.data ?? [],
     patientPreferences: patientPreferences.data ?? [],

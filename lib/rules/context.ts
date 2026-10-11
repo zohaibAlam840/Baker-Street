@@ -28,6 +28,7 @@ import {
   Provider,
   ProviderAvailability,
   ProviderCredential,
+  ProviderDisruption,
   ProviderService,
   Resource,
   Service,
@@ -52,6 +53,8 @@ export interface SnapshotRows {
   providerServices: ProviderService[];
   providerCredentials: ProviderCredential[];
   providerAvailability: ProviderAvailability[];
+  /** Open dated callouts. Optional keeps historical fixtures source-compatible. */
+  providerDisruptions?: ProviderDisruption[];
   patientAvailability: PatientAvailability[];
   patientRestrictions: PatientRestriction[];
   patientPreferences: PatientPreference[];
@@ -260,6 +263,18 @@ export class ScheduleContext {
           open.push(...ranges);
         }
         // ADMINISTRATIVE time is neither bookable nor blocking for patients.
+      }
+      for (const disruption of this.rows.providerDisruptions ?? []) {
+        if (
+          disruption.provider_id !== providerId ||
+          disruption.status === "CANCELLED" ||
+          disruption.status === "WITHDRAWN"
+        ) continue;
+        const range = this.grid.rangeOf(
+          new Date(disruption.starts_at),
+          new Date(disruption.ends_at),
+        );
+        if (range) closed.push(range);
       }
       return subtractRanges(open, closed);
     });

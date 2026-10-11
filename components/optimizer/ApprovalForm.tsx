@@ -44,7 +44,7 @@ export function ApprovalForm({
         <div className="space-y-3" aria-live="polite">
           <div className="rounded-xl bg-[var(--surface-sunken)] p-3 text-xs leading-relaxed text-[var(--ink-secondary)]">
             <strong className="block text-[var(--ink-primary)]">Confirm {optionLabel}</strong>
-            {patientName} Â· {weekLabel} Â· {appointmentCount} new visit{appointmentCount === 1 ? "" : "s"} Â· +{addedHours}h
+            {patientName} · {weekLabel} · {appointmentCount} new visit{appointmentCount === 1 ? "" : "s"} · +{addedHours}h
           </div>
           <label className="block">
             <span className="text-xs font-medium text-[var(--ink-secondary)]">Approval reason</span>

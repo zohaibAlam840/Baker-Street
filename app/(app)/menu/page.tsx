@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { ICONS } from "@/components/shell/icons";
 import { signOut } from "@/lib/auth/actions";
-import { ROLE_DEFINITIONS, navFor } from "@/lib/auth/roles";
+import { ROLE_DEFINITIONS, navFor, primaryNavFor } from "@/lib/auth/roles";
 import { requireSession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,12 @@ export const dynamic = "force-dynamic";
 export default async function MenuPage() {
   const session = await requireSession();
   const definition = ROLE_DEFINITIONS[session.role];
-  const rest = navFor(session.role).slice(4);
+  const primaryHrefs = new Set(
+    primaryNavFor(session.role).map((item) => item.href),
+  );
+  const rest = navFor(session.role).filter(
+    (item) => !primaryHrefs.has(item.href),
+  );
 
   return (
     <div className="space-y-4">
@@ -89,7 +94,7 @@ export default async function MenuPage() {
           href="/"
           className="flex items-center justify-between px-4 py-3.5 active:bg-[var(--surface-sunken)]"
         >
-          <span className="text-sm text-[var(--ink-primary)]">About this preview</span>
+          <span className="text-sm text-[var(--ink-primary)]">About Baker Street</span>
           <span aria-hidden className="text-[var(--ink-muted)]">
             ›
           </span>
@@ -105,8 +110,8 @@ export default async function MenuPage() {
       </div>
 
       <p className="px-1 text-[0.6875rem] leading-relaxed text-[var(--ink-muted)]">
-        Supabase Auth with database-backed roles. Scheduling figures remain
-        synthetic locally; nothing here is a real patient.
+        Authenticated workspace with database-backed roles. Access is limited
+        by your role and assigned records.
       </p>
     </div>
   );
