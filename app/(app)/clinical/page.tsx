@@ -23,7 +23,7 @@ export default async function ClinicalPage({
   const { ctx, synthetic } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
 
   // Caseload scope: the patients this supervisor actually sees.
-  const caseload = session.providerId
+  const caseload = synthetic && session.providerId
     ? new Set(
         (ctx.appointmentsByProvider.get(session.providerId) ?? []).map((a) => a.patient_id),
       )
@@ -44,6 +44,7 @@ export default async function ClinicalPage({
           ceiling — set independently of what the payer has authorized. Where
           those two numbers agree it should be because a clinician decided so,
           not because one was copied from the other.
+          <Link href="/clinical/new" className="ml-2 inline-flex min-h-11 items-center font-medium text-[var(--brand)] underline underline-offset-4">Add requirement</Link>
         </p>
       </div>
 
@@ -67,6 +68,13 @@ export default async function ClinicalPage({
               </span>
             </div>
             <ServiceSummaryTable rows={summary.rows} />
+            <div className="flex flex-wrap gap-2">
+              {(ctx.patientServiceRequirements.get(patient.id) ?? []).map((requirement) => (
+                <Link key={requirement.id} href={`/clinical/${requirement.id}?week=${ctx.grid.startDate}`} className="rounded-full border border-[var(--border-ring)] px-3 py-1.5 text-xs text-[var(--ink-secondary)]">
+                  Edit {ctx.services.get(requirement.service_id)?.service_name ?? "requirement"}
+                </Link>
+              ))}
+            </div>
           </section>
         );
       })}

@@ -5,12 +5,13 @@ import { Card, CardHeader } from "@/components/charts";
 import { WeekGrid } from "@/components/schedule/WeekGrid";
 import { AppointmentTable } from "@/components/schedule/tables";
 import { IconArrowUpRight } from "@/components/shell/icons";
-import { ROLE_DEFINITIONS } from "@/lib/auth/roles";
+import { ROLE_DEFINITIONS, can } from "@/lib/auth/roles";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { slotsToHours, subtractRanges } from "@/lib/domain/slots";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
 import { buildWeekView } from "@/lib/scheduling/weekView";
+import { addProviderCredential, addSupervisionRelationship } from "@/lib/workflows/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -291,6 +292,8 @@ export default async function ProviderDetailPage({
               })}
             </ul>
           )}
+          {can(session.role,"credentials.manage")&&<details className="mt-4"><summary className="cursor-pointer text-sm font-medium text-[var(--brand)]">Add credential</summary><form action={addProviderCredential} className="mt-3 grid gap-3 sm:grid-cols-2"><input type="hidden" name="provider_id" value={providerId}/><input required name="credential_type" placeholder="Credential type" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="credential_number" placeholder="Credential number" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="state" placeholder="State" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="issue_date" type="date" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="expiration_date" type="date" className="min-h-11 rounded-lg border px-3 text-sm"/><select name="status" className="min-h-11 rounded-lg border px-3 text-sm"><option>ACTIVE</option><option>PENDING</option><option>SUSPENDED</option><option>EXPIRED</option></select><button className="min-h-11 rounded-full bg-[var(--brand)] px-4 text-sm text-white sm:col-span-2">Add credential</button></form></details>}
+          {can(session.role,"credentials.manage")&&<details className="mt-4"><summary className="cursor-pointer text-sm font-medium text-[var(--brand)]">Assign supervisor</summary><form action={addSupervisionRelationship} className="mt-3 grid gap-3 sm:grid-cols-2"><input type="hidden" name="supervisee_id" value={providerId}/><select required name="supervisor_id" className="min-h-11 rounded-lg border px-3 text-sm"><option value="">Choose supervisor</option>{[...ctx.providers.values()].filter(p=>p.id!==providerId).map(p=><option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}</select><input name="effective_start" type="date" defaultValue={new Date().toISOString().slice(0,10)} className="min-h-11 rounded-lg border px-3 text-sm"/><button className="min-h-11 rounded-full bg-[var(--brand)] px-4 text-sm text-white sm:col-span-2">Assign supervisor</button></form></details>}
 
           <h3 className="mt-5 text-sm font-medium text-[var(--ink-primary)]">
             Eligible to deliver
@@ -315,6 +318,7 @@ export default async function ProviderDetailPage({
 
         <Card>
           <CardHeader title="Working hours" sub="What the engine treats as bookable" />
+          <Link href={`/providers/${provider.id}/availability?week=${ctx.grid.startDate}`} className="mt-3 inline-block text-xs underline underline-offset-4">Manage availability and PTO</Link>
           <ul className="mt-3 divide-y divide-[var(--rule-hairline)]">
             {week7.map((day) => (
               <li key={day.day} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2.5">

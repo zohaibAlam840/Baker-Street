@@ -1,0 +1,27 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { addCareTeamMember, endCareTeamMember } from "@/lib/careTeam/actions";
+import { can } from "@/lib/auth/roles";
+import { requirePermission } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server";
+
+export default async function CareTeamPage({ params, searchParams }: { params: Promise<{ patientId: string }>; searchParams: Promise<{ error?: string; notice?: string }> }) {
+  const session = await requirePermission("view.patient_schedule");
+  const canManage = can(session.role, "schedule.book") || can(session.role, "clinical.set_requirements");
+  const [{ patientId }, query] = await Promise.all([params, searchParams]);
+  const supabase = await createClient();
+  const [{ data: patient }, { data: memberships }, { data: providers }] = await Promise.all([
+    supabase.from("patients").select("id,first_name,last_name").eq("id", patientId).single(),
+    supabase.from("patient_care_team").select("id,provider_id,relationship,effective_start,effective_end,active").eq("patient_id", patientId).order("active", { ascending: false }),
+    supabase.from("providers").select("id,first_name,last_name,provider_type,status").eq("status", "ACTIVE").order("last_name"),
+  ]);
+  if (!patient) notFound();
+  const providerMap = new Map((providers ?? []).map(p => [p.id, p]));
+  return <div className="space-y-5">
+    <div><Link href={`/patients/${patient.id}`} className="text-xs underline underline-offset-4">← Patient record</Link><h1 className="mt-2 text-xl font-semibold">{patient.first_name} {patient.last_name} · care team</h1><p className="text-sm text-[var(--ink-secondary)]">These assignments determine caseload visibility for clinicians and supervisors.</p></div>
+    {query.error && <p role="alert" className="rounded-lg bg-[var(--surface-sunken)] p-3 text-sm text-[var(--status-critical)]">{query.error}</p>}{query.notice && <p role="status" className="rounded-lg bg-[var(--brand-tint)] p-3 text-sm">{query.notice}</p>}
+    <section className="card p-4"><h2 className="text-sm font-medium">Current and previous assignments</h2><div className="mt-3 space-y-2">{(memberships ?? []).map(m => { const p = providerMap.get(m.provider_id); return <article key={m.id} className="flex flex-col gap-3 rounded-lg border border-[var(--rule-hairline)] p-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{p ? `${p.first_name} ${p.last_name}` : "Unavailable clinician"}</p><p className="text-xs text-[var(--ink-secondary)]">{m.relationship.replaceAll("_", " ")} · since {m.effective_start}{!m.active && ` · ended ${m.effective_end ?? "—"}`}</p></div>{canManage && m.active && <form action={endCareTeamMember}><input type="hidden" name="patient_id" value={patientId}/><input type="hidden" name="membership_id" value={m.id}/><button className="min-h-11 w-full rounded-full border border-[var(--border-ring)] px-4 text-sm sm:w-auto">End assignment</button></form>}</article>})}{memberships?.length === 0 && <p className="text-sm text-[var(--ink-secondary)]">No care-team assignments yet.</p>}</div></section>
+    {canManage && <section className="card p-4"><h2 className="text-sm font-medium">Add team member</h2><form action={addCareTeamMember} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr_auto] lg:items-end"><input type="hidden" name="patient_id" value={patientId}/><label className="text-xs text-[var(--ink-secondary)]"><span className="mb-1 block">Clinician</span><select required name="provider_id" className={control}><option value="">Choose clinician</option>{(providers ?? []).map(p => <option key={p.id} value={p.id}>{p.last_name}, {p.first_name} · {p.provider_type}</option>)}</select></label><label className="text-xs text-[var(--ink-secondary)]"><span className="mb-1 block">Relationship</span><select name="relationship" className={control}><option value="PRIMARY_CLINICIAN">Primary clinician</option><option value="SUPERVISOR">Supervisor</option><option value="TREATING_PROVIDER">Treating provider</option><option value="CARE_COORDINATOR">Care coordinator</option></select></label><label className="text-xs text-[var(--ink-secondary)]"><span className="mb-1 block">Effective date</span><input type="date" name="effective_start" defaultValue={new Date().toISOString().slice(0,10)} className={control}/></label><button className="min-h-11 rounded-full bg-[var(--brand)] px-4 text-sm font-medium text-white">Add member</button></form></section>}
+  </div>;
+}
+const control = "min-h-11 w-full rounded-lg border border-[var(--border-ring)] bg-[var(--surface-1)] px-3 py-2 text-sm";

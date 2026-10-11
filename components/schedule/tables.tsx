@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ServiceSummaryRow } from "@/lib/scheduling/summary";
 import type { WeekBlock, WeekView } from "@/lib/scheduling/weekView";
 
@@ -166,7 +167,7 @@ export function AppointmentTable({ view }: { view: WeekView }) {
                         className={`dept-${block.departmentSlot} inline-block size-2.5 shrink-0 rounded-sm`}
                         style={{ background: "var(--dept)" }}
                       />
-                      {block.serviceName}
+                      <Link href={`/appointments/${block.id}?week=${view.startDate}`} className="underline underline-offset-4">{block.serviceName}</Link>
                     </span>
                   </td>
                   <td className={cell}>{block.counterpart}</td>

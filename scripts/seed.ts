@@ -104,6 +104,30 @@ async function main() {
   await insert("authorizations", rows.authorizations);
   await insert("appointments", rows.appointments);
 
+  // Derive an explicit care team from the fixture's delivered care. RLS uses
+  // these durable relationships, never appointment history, to define a
+  // provider's caseload.
+  const careTeam = new Map<string, { patient_id: string; provider_id: string }>();
+  for (const appointment of rows.appointments) {
+    if (!appointment.provider_id) continue;
+    careTeam.set(`${appointment.patient_id}:${appointment.provider_id}`, {
+      patient_id: uuidFor(appointment.patient_id),
+      provider_id: uuidFor(appointment.provider_id),
+    });
+  }
+  const careTeamRows = [...careTeam.values()].map((link) => ({
+    id: uuidFor(`care-team:${link.patient_id}:${link.provider_id}`),
+    ...link,
+    relationship: "TREATING_PROVIDER",
+    effective_start: rows.patientServiceRequirements[0]?.effective_start ?? "2026-01-01",
+    active: true,
+  }));
+  if (careTeamRows.length) {
+    const { error } = await supabase.from("patient_care_team").upsert(careTeamRows, { onConflict: "id" });
+    if (error) throw new Error(`patient_care_team: ${error.message}`);
+    console.log(`  ${"patient_care_team".padEnd(30)} ${careTeamRows.length}`);
+  }
+
   // appointment_resources has no id column in the fixture.
   const appointmentResources = rows.appointmentResources.map((link) => ({
     id: uuidFor(`apt-res:${link.appointment_id}:${link.resource_id}`),

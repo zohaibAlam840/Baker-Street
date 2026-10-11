@@ -367,6 +367,22 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: "shield",
   },
   {
+    href: "/notifications",
+    label: "Work queue",
+    short: "Tasks",
+    requires: [],
+    description: "Warnings and follow-up work",
+    icon: "clipboard",
+  },
+  {
+    href: "/reports",
+    label: "Reports",
+    short: "Reports",
+    requires: ["analytics.capacity"],
+    description: "Care delivery and utilization exports",
+    icon: "chart",
+  },
+  {
     href: "/settings",
     label: "Settings",
     short: "Settings",

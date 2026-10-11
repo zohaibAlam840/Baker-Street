@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeApi, isApiError } from "@/lib/auth/api";
 
 import { loadHorizon } from "@/lib/data/snapshot";
 import { SLOTS_PER_DAY } from "@/lib/domain/slots";
@@ -29,6 +30,8 @@ function parseDateOnlyAsInstant(date: string, timeZone: string): Date {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await authorizeApi("schedule.search_availability");
+  if (isApiError(auth)) return auth;
   const params = request.nextUrl.searchParams;
 
   const patientId = params.get("patient_id");

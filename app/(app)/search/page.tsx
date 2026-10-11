@@ -32,11 +32,11 @@ export default async function SearchPage({
   const { q, week } = await searchParams;
   const query = (q ?? "").trim();
 
-  const { ctx } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
+  const { ctx, synthetic } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
   const weekStart = ctx.grid.startDate;
 
   const scope = ROLE_DEFINITIONS[session.role].scope;
-  const restricted = (scope === "own" || scope === "caseload") && session.providerId;
+  const restricted = synthetic && (scope === "own" || scope === "caseload") && session.providerId;
 
   // The caseload a scoped user may see at all.
   const ownAppointments = session.providerId
@@ -201,7 +201,7 @@ export default async function SearchPage({
               return (
                 <li key={appointment.id}>
                   <Link
-                    href={`/patients/${appointment.patient_id}?week=${weekStart}`}
+                    href={`/appointments/${appointment.id}?week=${weekStart}`}
                     className="-mx-2 flex flex-col gap-1 rounded-lg px-2 py-2.5 transition-colors hover:bg-[var(--surface-sunken)] sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                   >
                     <span className="min-w-0">

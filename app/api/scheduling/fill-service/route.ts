@@ -13,6 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeApi, isApiError } from "@/lib/auth/api";
 
 import { loadHorizon } from "@/lib/data/snapshot";
 import { parseDateOnly, startOfWeek, zonedTimeToInstant } from "@/lib/domain/time";
@@ -33,6 +34,8 @@ interface FillServiceBody {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await authorizeApi("schedule.optimize");
+  if (isApiError(auth)) return auth;
   let body: FillServiceBody;
   try {
     body = await request.json();

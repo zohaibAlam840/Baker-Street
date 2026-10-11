@@ -105,8 +105,8 @@ export default async function MenuPage() {
       </div>
 
       <p className="px-1 text-[0.6875rem] leading-relaxed text-[var(--ink-muted)]">
-        Demo role switcher — not real authentication, and every figure comes
-        from synthetic data. Nothing here is a real patient.
+        Supabase Auth with database-backed roles. Scheduling figures remain
+        synthetic locally; nothing here is a real patient.
       </p>
     </div>
   );

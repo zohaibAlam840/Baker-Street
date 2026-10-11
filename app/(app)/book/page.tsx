@@ -337,14 +337,12 @@ export default async function BookPage({
                     </p>
                   )}
 
-                  <button
-                    type="button"
-                    disabled
-                    title="Booking is built alongside the approval workflow"
-                    className="mt-4 w-full cursor-not-allowed rounded-full border border-[var(--border-ring)] px-3 py-2 text-xs text-[var(--ink-muted)]"
+                  <Link
+                    href={`/appointments/new?week=${ctx.grid.startDate}&patient=${patientId}&service=${serviceId}&provider=${slot.provider_id}&location=${slot.location_id ?? ""}&start=${encodeURIComponent(slot.start.slice(0, 16))}&duration=${slot.duration_minutes}`}
+                    className="mt-4 block w-full rounded-full border border-[var(--brand)] px-3 py-2 text-center text-xs font-medium text-[var(--brand)]"
                   >
-                    Book — not yet enabled
-                  </button>
+                    Review this appointment
+                  </Link>
                 </Card>
               </li>
             );

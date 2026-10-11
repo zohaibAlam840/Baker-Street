@@ -172,8 +172,8 @@ export default async function LandingPage() {
                   className="inline-block size-1.5 rounded-full"
                   style={{ background: "var(--status-warning)" }}
                 />
-                Preview build — synthetic data, no real patient information, and
-                sign-in is a role switcher rather than real authentication.
+                Preview build — synthetic scheduling data, no real patient information,
+                and access is protected by Supabase Auth and database roles.
               </p>
             </div>
 

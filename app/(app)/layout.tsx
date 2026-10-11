@@ -186,7 +186,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          {/* Demo banner — the sign-in verifies nothing, so say so everywhere. */}
+          {/* Environment banner keeps synthetic scheduling data unmistakable. */}
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl bg-[var(--surface-sunken)] px-3 py-2 lg:mx-6">
             <span
               aria-hidden
@@ -194,7 +194,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               style={{ background: "var(--status-warning)" }}
             />
             <p className="text-[0.6875rem] leading-tight text-[var(--ink-secondary)]">
-              Demo role switcher — not real authentication. Synthetic data only.
+              Supabase Auth · administrator-approved roles · synthetic scheduling data locally.
             </p>
           </div>
 

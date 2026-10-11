@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeApi, isApiError } from "@/lib/auth/api";
 
 import { answerQuestion } from "@/lib/ai/answer";
 import { interpret } from "@/lib/ai/interpret";
@@ -22,6 +23,8 @@ import { defaultWeekStart } from "@/lib/scheduling/defaults";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  const auth = await authorizeApi("schedule.search_availability");
+  if (isApiError(auth)) return auth;
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });

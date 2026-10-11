@@ -6,11 +6,10 @@
  * will call it thousands of times per optimization run.
  */
 
-import { createClient } from "@supabase/supabase-js";
-
 import { SlotGrid } from "../domain/slots";
 import { ScheduleContext, SnapshotRows } from "../rules/context";
 import { buildClinicRows } from "../testing/clinic";
+import { createClient } from "../supabase/server";
 
 export interface HorizonRequest {
   /** YYYY-MM-DD, local to `timeZone`. */
@@ -25,19 +24,11 @@ const DEFAULT_TIMEZONE = process.env.SCHEDULING_TIMEZONE ?? "America/New_York";
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(
+    process.env.USE_SYNTHETIC_DATA !== "true" &&
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+      (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
   );
-}
-
-function serviceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  // PHI reads run server-side only; the service role key must never reach the
-  // browser bundle, so this module is server-only by construction.
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error("Supabase is not configured.");
-  return createClient(url, key, { auth: { persistSession: false } });
 }
 
 /**
@@ -48,7 +39,9 @@ function serviceClient() {
  * `ScheduleContext`.
  */
 export async function loadSnapshotRows(request: HorizonRequest): Promise<SnapshotRows> {
-  const supabase = serviceClient();
+  // This client carries the signed-in user's cookies. Every query is filtered
+  // by Postgres RLS; ordinary page reads never use the service-role key.
+  const supabase = await createClient();
   const timeZone = request.timeZone ?? DEFAULT_TIMEZONE;
   const grid = new SlotGrid(request.startDate, request.dayCount ?? 7, timeZone);
 
@@ -161,7 +154,7 @@ export async function loadHorizon(request: HorizonRequest): Promise<LoadedHorizo
   const timeZone = request.timeZone ?? DEFAULT_TIMEZONE;
   const grid = new SlotGrid(request.startDate, request.dayCount ?? 7, timeZone);
 
-  if (!isSupabaseConfigured()) {
+  if (process.env.USE_SYNTHETIC_DATA === "true" || !isSupabaseConfigured()) {
     return { ctx: new ScheduleContext(grid, buildClinicRows()), synthetic: true };
   }
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { ROLES, ROLE_DEFINITIONS } from "@/lib/auth/roles";
@@ -57,9 +58,9 @@ export default async function ConfigurationPage() {
                   className="border-b border-[var(--rule-hairline)] last:border-0"
                 >
                   <td className="px-3 py-2">
-                    <span className="block text-[var(--ink-primary)]">
+                    <Link href={`/configuration/services/${service.id}`} className="block font-medium text-[var(--ink-primary)] underline underline-offset-4">
                       {service.service_name}
-                    </span>
+                    </Link>
                     <span className="block text-xs text-[var(--ink-muted)]">
                       {service.service_code}
                     </span>
@@ -109,9 +110,9 @@ export default async function ConfigurationPage() {
               key={resource.id}
               className="rounded-lg border border-[var(--border-ring)] bg-[var(--surface-1)] p-3"
             >
-              <span className="block text-sm text-[var(--ink-primary)]">
+              <Link href={`/configuration/resources/${resource.id}`} className="block text-sm font-medium text-[var(--ink-primary)] underline underline-offset-4">
                 {resource.name}
-              </span>
+              </Link>
               <span className="block text-xs text-[var(--ink-muted)]">
                 {resource.resource_type} · holds {resource.capacity} ·{" "}
                 {resource.location_id
@@ -121,6 +122,11 @@ export default async function ConfigurationPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-medium text-[var(--ink-primary)]">Locations</h2><Link href="/configuration/users" className="text-xs underline underline-offset-4">Manage users and roles</Link></div>
+        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{[...ctx.locations.values()].map((location) => <li key={location.id} className="rounded-lg border border-[var(--border-ring)] bg-[var(--surface-1)] p-3"><Link href={`/configuration/locations/${location.id}`} className="text-sm font-medium underline underline-offset-4">{location.name}</Link><span className="mt-1 block text-xs text-[var(--ink-muted)]">{location.type} · {location.city ?? "No city"}, {location.state ?? "—"}</span></li>)}</ul>
       </section>
 
       <section className="space-y-3">

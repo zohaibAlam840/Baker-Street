@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { slotsToHours } from "@/lib/domain/slots";
@@ -52,6 +53,7 @@ export default async function AuthorizationsPage({
           What each payer has approved, and how much of it is on the calendar
           this week. Authorized hours are a ceiling on what can be billed — they
           are not a statement of what the patient needs.
+          <Link href="/authorizations/new" className="ml-2 inline-flex min-h-11 items-center font-medium text-[var(--brand)] underline underline-offset-4">Add authorization</Link>
         </p>
       </div>
 
@@ -76,7 +78,7 @@ export default async function AuthorizationsPage({
                 key={authorization.id}
                 className="border-b border-[var(--rule-hairline)] last:border-0"
               >
-                <td className="px-3 py-2">{patientName}</td>
+                <td className="px-3 py-2"><Link className="font-medium underline underline-offset-4" href={`/authorizations/${authorization.id}?week=${ctx.grid.startDate}`}>{patientName}</Link></td>
                 <td className="px-3 py-2">{serviceName}</td>
                 <td className="px-3 py-2 text-[var(--ink-secondary)]">
                   {authorization.payer ?? "—"}

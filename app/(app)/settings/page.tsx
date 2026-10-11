@@ -5,6 +5,7 @@ import { ROLE_DEFINITIONS } from "@/lib/auth/roles";
 import { requireSession } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/data/snapshot";
 import { SCHEDULING_TIMEZONE } from "@/lib/scheduling/defaults";
+import { PushNotifications } from "@/components/settings/PushNotifications";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,8 @@ export default async function SettingsPage() {
           Your account and this environment.
         </p>
       </div>
+
+      <PushNotifications />
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
@@ -62,7 +65,7 @@ export default async function SettingsPage() {
             <Row label="Data source" value={liveData ? "Supabase" : "Synthetic"} />
             <Row label="Timezone" value={SCHEDULING_TIMEZONE} />
             <Row label="Scheduling grid" value="15-minute slots" />
-            <Row label="Authentication" value="Demo role switcher" />
+            <Row label="Authentication" value="Supabase Auth" />
           </dl>
           <p className="mt-4 text-xs leading-relaxed text-[var(--ink-secondary)]">
             {liveData
@@ -111,8 +114,8 @@ export default async function SettingsPage() {
           {[
             "No CP-SAT solver — options come from heuristics, not a proved optimum",
             "No multi-service trade-off: each service is optimised on its own",
-            "Nothing writes. No booking, no approval, no audit entries",
-            "No real authentication, and no row-level security in the database",
+            "No native iOS or Android package; the mobile experience is an installable PWA",
+            "No billing claim submission or electronic health-record integration",
             "No language model — the assistant is a fixed-phrase parser",
             "No billing or revenue data of any kind",
           ].map((item) => (
@@ -134,9 +137,9 @@ export default async function SettingsPage() {
         <CardHeader title="Before real patient data" />
         <ol className="mt-4 space-y-2">
           {[
-            "Real sign-in, ideally the practice's existing identity provider",
-            "Roles read from the database rather than chosen from a menu",
-            "Row-level security in Postgres, so a query bug cannot leak a record",
+            "Confirm Supabase Auth or replace it with the practice's identity provider",
+            "Run the PostgreSQL access suite and complete the production security review",
+            "Link every clinical account to a provider record and active care teams",
             "A paid database plan and a signed business associate agreement",
             "Encryption in transit and at rest, with audited access",
           ].map((step, index) => (

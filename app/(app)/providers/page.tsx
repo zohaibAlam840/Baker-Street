@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { Card } from "@/components/charts";
-import { ROLE_DEFINITIONS } from "@/lib/auth/roles";
+import { ROLE_DEFINITIONS, can } from "@/lib/auth/roles";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { slotsToHours, subtractRanges } from "@/lib/domain/slots";
@@ -91,6 +91,8 @@ export default async function ProvidersPage({
         </div>
 
         {/* One filter row above everything it scopes. */}
+        <div className="flex flex-wrap items-center gap-2">
+        {can(session.role, "credentials.manage") && <Link href="/providers/new" className="rounded-full bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-white">Add clinician</Link>}
         <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:px-0">
           <FilterChip href={`/providers?week=${ctx.grid.startDate}`} active={!type}>
             All
@@ -104,6 +106,7 @@ export default async function ProvidersPage({
               {t}
             </FilterChip>
           ))}
+        </div>
         </div>
       </div>
 

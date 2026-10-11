@@ -13,6 +13,8 @@ import { formatClockTime, parseClockTime } from "@/lib/domain/time";
 import { defaultWeekStart, demoToday } from "@/lib/scheduling/defaults";
 import { summarisePatientWeek } from "@/lib/scheduling/summary";
 import { buildWeekView } from "@/lib/scheduling/weekView";
+import { createClient } from "@/lib/supabase/server";
+import { addPatientContact, toggleIntakeTask } from "@/lib/workflows/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,20 +35,25 @@ export default async function PatientDetailPage({
   searchParams,
 }: {
   params: Promise<{ patientId: string }>;
-  searchParams: Promise<{ week?: string }>;
+  searchParams: Promise<{ week?: string; error?: string; notice?: string }>;
 }) {
   const session = await requirePermission("view.patient_schedule");
   const { patientId } = await params;
   const { week } = await searchParams;
 
-  const { ctx } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
+  const { ctx, synthetic } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
   const patient = ctx.patients.get(patientId);
   if (!patient) notFound();
+  const supabase = await createClient();
+  const [{data:intakeTasks},{data:contacts}] = await Promise.all([
+    supabase.from("intake_tasks").select("id,label,completed").eq("patient_id",patientId).order("label"),
+    supabase.from("patient_contacts").select("id,name,relationship,phone,email,is_primary").eq("patient_id",patientId).order("is_primary",{ascending:false}),
+  ]);
 
   // A clinician scoped to their own caseload cannot open a patient they do
   // not see. Hiding the link is not enough — this is the check that matters.
   const scope = ROLE_DEFINITIONS[session.role].scope;
-  if ((scope === "own" || scope === "caseload") && session.providerId) {
+  if (synthetic && (scope === "own" || scope === "caseload") && session.providerId) {
     const mine = (ctx.appointmentsByProvider.get(session.providerId) ?? []).some(
       (a) => a.patient_id === patientId,
     );
@@ -100,6 +107,7 @@ export default async function PatientDetailPage({
       >
         ← All patients
       </Link>
+      {week && null}
 
       {/* ------------------------------- header ------------------------------- */}
       <Card>
@@ -139,6 +147,14 @@ export default async function PatientDetailPage({
           </div>
 
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            {(can(session.role, "schedule.book") || can(session.role, "clinical.set_requirements")) && (
+              <Link
+                href={`/patients/${patientId}/care-team`}
+                className="inline-flex flex-1 items-center justify-center rounded-full border border-[var(--border-ring)] px-4 py-2.5 text-xs font-medium text-[var(--ink-primary)] sm:flex-none"
+              >
+                Care team
+              </Link>
+            )}
             {can(session.role, "schedule.optimize") && (
               <Link
                 href={`/optimize?patient=${patientId}&week=${ctx.grid.startDate}`}
@@ -284,6 +300,11 @@ export default async function PatientDetailPage({
       {/* --------------------- availability, prefs, payers --------------------- */}
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
+          <CardHeader title="Intake readiness" sub={`${(intakeTasks??[]).filter(t=>t.completed).length}/${(intakeTasks??[]).length} complete`} />
+          <div className="mt-3 space-y-2">{(intakeTasks??[]).map(task=><form key={task.id} action={toggleIntakeTask} className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface-sunken)] p-3"><input type="hidden" name="task_id" value={task.id}/><input type="hidden" name="patient_id" value={patientId}/><input type="hidden" name="complete" value={String(!task.completed)}/><span className="text-sm">{task.completed?"✓ ":""}{task.label}</span>{can(session.role,"schedule.book")&&<button className="min-h-11 rounded-full border border-[var(--border-ring)] px-3 text-xs">{task.completed?"Reopen":"Complete"}</button>}</form>)}</div>
+        </Card>
+        <Card><CardHeader title="Contacts" sub="Authorized family and caregivers"/><div className="mt-3 space-y-2">{(contacts??[]).map(contact=><div key={contact.id} className="rounded-lg bg-[var(--surface-sunken)] p-3"><p className="text-sm font-medium">{contact.name}{contact.is_primary&&" · primary"}</p><p className="text-xs text-[var(--ink-secondary)]">{contact.relationship} · {contact.phone??contact.email??"No contact detail"}</p></div>)}{contacts?.length===0&&<p className="text-sm text-[var(--ink-secondary)]">No contacts recorded.</p>}</div>{can(session.role,"schedule.book")&&<details className="mt-4"><summary className="cursor-pointer text-sm font-medium text-[var(--brand)]">Add contact</summary><form action={addPatientContact} className="mt-3 grid gap-3 sm:grid-cols-2"><input type="hidden" name="patient_id" value={patientId}/><input required name="name" placeholder="Name" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="relationship" placeholder="Relationship" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="phone" type="tel" placeholder="Phone" className="min-h-11 rounded-lg border px-3 text-sm"/><input name="email" type="email" placeholder="Email" className="min-h-11 rounded-lg border px-3 text-sm"/><label className="flex min-h-11 items-center gap-2 text-sm"><input name="is_primary" type="checkbox"/> Primary contact</label><label className="flex min-h-11 items-center gap-2 text-sm"><input name="authorized" type="checkbox"/> Authorized for information</label><button className="min-h-11 rounded-full bg-[var(--brand)] px-4 text-sm text-white sm:col-span-2">Add contact</button></form></details>}</Card>
+        <Card>
           <CardHeader
             title="When they can be seen"
             sub="Declared availability, and what blocks it"
@@ -384,9 +405,9 @@ export default async function PatientDetailPage({
                       className="rounded-xl bg-[var(--surface-sunken)] px-3 py-2.5"
                     >
                       <div className="flex items-baseline justify-between gap-3">
-                        <span className="min-w-0 truncate text-xs font-medium text-[var(--ink-primary)]">
+                        <Link href={`/authorizations/${authorization.id}?week=${ctx.grid.startDate}`} className="min-w-0 truncate text-xs font-medium text-[var(--ink-primary)] underline underline-offset-4">
                           {ctx.services.get(authorization.service_id)?.service_name}
-                        </span>
+                        </Link>
                         <span className="shrink-0 text-xs tabular-nums text-[var(--ink-secondary)]">
                           {used}h / {authorization.authorized_hours ?? "—"}h
                         </span>

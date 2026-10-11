@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { Card } from "@/components/charts";
-import { ROLE_DEFINITIONS } from "@/lib/auth/roles";
+import { ROLE_DEFINITIONS, can } from "@/lib/auth/roles";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { slotsToHours } from "@/lib/domain/slots";
@@ -17,10 +17,10 @@ export default async function PatientsPage({
 }) {
   const session = await requirePermission("view.patient_schedule");
   const { week, q } = await searchParams;
-  const { ctx } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
+  const { ctx, synthetic } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
 
   const definition = ROLE_DEFINITIONS[session.role];
-  const restricted =
+  const restricted = synthetic &&
     (definition.scope === "own" || definition.scope === "caseload") && session.providerId;
 
   const caseload = restricted
@@ -65,6 +65,8 @@ export default async function PatientsPage({
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+        {can(session.role, "schedule.book") && <Link href="/patients/new" className="rounded-full bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-white">Add patient</Link>}
         <form className="flex items-center gap-2">
           <input type="hidden" name="week" value={ctx.grid.startDate} />
           <input
@@ -81,6 +83,7 @@ export default async function PatientsPage({
             Search
           </button>
         </form>
+        </div>
       </div>
 
       {rows.length === 0 ? (

@@ -1,0 +1,2 @@
+type Level="info"|"warn"|"error";
+export function logEvent(level:Level,event:string,details:Record<string,unknown>={}){const payload={timestamp:new Date().toISOString(),level,event,environment:process.env.VERCEL_ENV??process.env.NODE_ENV??"unknown",release:process.env.VERCEL_GIT_COMMIT_SHA??process.env.RELEASE_SHA??"local",...details};const line=JSON.stringify(payload);if(level==="error")console.error(line);else if(level==="warn")console.warn(line);else console.info(line)}

@@ -1,0 +1,2 @@
+import type {MetadataRoute} from"next";
+export default function manifest():MetadataRoute.Manifest{return{name:"Baker Street Clinical Scheduling",short_name:"Baker Street",description:"Secure clinical scheduling and operations",start_url:"/dashboard",display:"standalone",background_color:"#f7f9fa",theme_color:"#047857",orientation:"any",icons:[{src:"/favicon.ico",sizes:"any",type:"image/x-icon"}]}}

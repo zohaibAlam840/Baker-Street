@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeApi, isApiError } from "@/lib/auth/api";
 
 import { startOfWeek } from "@/lib/domain/time";
 import { loadHorizon } from "@/lib/data/snapshot";
@@ -33,6 +34,8 @@ interface CheckConflictBody {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await authorizeApi("schedule.check_conflict");
+  if (isApiError(auth)) return auth;
   let body: CheckConflictBody;
   try {
     body = await request.json();
