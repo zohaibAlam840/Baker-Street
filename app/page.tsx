@@ -17,7 +17,7 @@ import { answerQuestion } from "@/lib/ai/answer";
 import { interpret } from "@/lib/ai/interpret";
 import { ROLES, ROLE_DEFINITIONS } from "@/lib/auth/roles";
 import { getSession } from "@/lib/auth/session";
-import { loadHorizon } from "@/lib/data/snapshot";
+import { loadPublicDemoHorizon } from "@/lib/data/snapshot";
 import { slotsToHours } from "@/lib/domain/slots";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
 
@@ -28,7 +28,11 @@ export default async function LandingPage() {
 
   // Real numbers from the demo clinic. A landing page with invented figures
   // beside a product that computes real ones would be the odd thing.
-  const { ctx } = await loadHorizon({ startDate: defaultWeekStart() });
+  // The landing page is a public product tour. Its figures come from the
+  // documented synthetic clinic, never from rows visible to the current
+  // cookie. This also keeps pending, disabled and stale sessions from making
+  // the public home page fail while RLS correctly withholds clinical data.
+  const { ctx } = loadPublicDemoHorizon({ startDate: defaultWeekStart() });
   const patients = [...ctx.patients.values()];
   const activePatients = patients.filter((p) => p.status === "ACTIVE").length;
   const clinicians = [...ctx.providers.values()].length;

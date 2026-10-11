@@ -145,6 +145,21 @@ export interface LoadedHorizon {
 }
 
 /**
+ * Build the intentionally synthetic clinic used by the public product tour.
+ *
+ * Public pages must not depend on the visitor's database permissions. A valid
+ * Supabase cookie without an approved profile (for example, just after sign-up
+ * or after an account is disabled) correctly sees no clinical rows through
+ * RLS. Keeping the tour on the fixture makes `/` safe for every authentication
+ * state and prevents it from becoming an accidental patient-data read.
+ */
+export function loadPublicDemoHorizon(request: HorizonRequest): LoadedHorizon {
+  const timeZone = request.timeZone ?? DEFAULT_TIMEZONE;
+  const grid = new SlotGrid(request.startDate, request.dayCount ?? 7, timeZone);
+  return { ctx: new ScheduleContext(grid, buildClinicRows()), synthetic: true };
+}
+
+/**
  * Load a horizon, falling back to the built-in acceptance scenario when no
  * Supabase project is configured. The fallback is what makes the endpoints
  * runnable on a fresh clone; every response says which source it used so a
@@ -155,7 +170,7 @@ export async function loadHorizon(request: HorizonRequest): Promise<LoadedHorizo
   const grid = new SlotGrid(request.startDate, request.dayCount ?? 7, timeZone);
 
   if (process.env.USE_SYNTHETIC_DATA === "true" || !isSupabaseConfigured()) {
-    return { ctx: new ScheduleContext(grid, buildClinicRows()), synthetic: true };
+    return loadPublicDemoHorizon(request);
   }
 
   const rows = await loadSnapshotRows(request);
