@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card, CardHeader } from "@/components/charts";
+import { ActionSubmit } from "@/components/forms/ActionSubmit";
 import { Field, inputClass } from "@/components/forms/PrototypeForm";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
@@ -22,5 +23,5 @@ export default async function NewAppointmentPage({ searchParams }: { searchParam
     <Field label="Duration"><select required name="duration_minutes" className={inputClass} defaultValue={query.duration??"60"}>{[30,45,60,90,120,180].map(n=><option key={n} value={n}>{n} minutes</option>)}</select></Field>
     <Field label="Repeat"><select name="repeat_count" className={inputClass} defaultValue="1"><option value="1">One appointment</option><option value="4">Weekly · 4 weeks</option><option value="8">Weekly · 8 weeks</option><option value="12">Weekly · 12 weeks</option><option value="26">Weekly · 26 weeks</option></select></Field>
     <Field label="Protection"><select name="scheduling_flexibility" className={inputClass}><option>FLEXIBLE</option><option>PROTECTED</option><option>LOCKED</option></select></Field>
-  </div><label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="telehealth"/> Telehealth appointment</label><Field label="Internal note"><textarea name="notes" className={`${inputClass} min-h-24`}/></Field><button className="min-h-11 w-full rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-white sm:w-auto">Check and book</button></form></Card></div>;
+  </div><label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="telehealth"/> Telehealth appointment</label><Field label="Internal note"><textarea name="notes" className={`${inputClass} min-h-24`}/></Field><ActionSubmit className="w-full sm:w-auto" pendingLabel="Checking availability…">Check and book</ActionSubmit></form></Card></div>;
 }

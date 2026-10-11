@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { AssistantWidget } from "@/components/shell/AssistantWidget";
 import { BottomNav, SidebarNav } from "@/components/shell/Nav";
 import { NotificationsMenu, type AssignedNotification } from "@/components/shell/NotificationsMenu";
@@ -132,14 +133,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               </span>
             </span>
             <form action={signOut}>
-              <button
-                type="submit"
+              <AuthSubmitButton
                 title="Sign out"
-                aria-label="Sign out"
+                label="Sign out"
+                iconOnly
+                pendingLabel="Signing you out…"
                 className="grid size-8 place-items-center rounded-lg text-[var(--ink-muted)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--ink-primary)]"
               >
                 <IconArrowUpRight className="size-4" />
-              </button>
+              </AuthSubmitButton>
             </form>
           </div>
 

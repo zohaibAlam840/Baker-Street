@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { IconLogo } from "@/components/shell/icons";
 import { signIn } from "@/lib/auth/actions";
 
@@ -10,7 +11,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <form action={signIn} className="mt-6 space-y-4">
       <Field label="Work email"><input required type="email" name="email" autoComplete="email" className={field}/></Field>
       <Field label="Password" aside={<Link href="/forgot-password" className="underline underline-offset-4">Forgot password?</Link>}><input required type="password" name="password" autoComplete="current-password" className={field}/></Field>
-      <button className={primary}>Sign in</button>
+      <AuthSubmitButton
+        className={primary}
+        pendingLabel="Signing you in…"
+        pendingDescription="Checking your account and loading your secure workspace."
+      >
+        Sign in
+      </AuthSubmitButton>
     </form>
     <p className="mt-5 text-center text-sm text-[var(--ink-secondary)]">Need an account? <Link href="/signup" className="font-medium text-[var(--brand)] underline underline-offset-4">Request access</Link></p>
   </AuthShell>;

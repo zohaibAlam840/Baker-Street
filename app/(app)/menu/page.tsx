@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { ICONS } from "@/components/shell/icons";
 import { signOut } from "@/lib/auth/actions";
 import { ROLE_DEFINITIONS, navFor, primaryNavFor } from "@/lib/auth/roles";
@@ -100,12 +101,13 @@ export default async function MenuPage() {
           </span>
         </Link>
         <form action={signOut}>
-          <button
-            type="submit"
+          <AuthSubmitButton
+            align="start"
+            pendingLabel="Signing you out…"
             className="w-full px-4 py-3.5 text-left text-sm text-[var(--ink-primary)] active:bg-[var(--surface-sunken)]"
           >
             Sign out
-          </button>
+          </AuthSubmitButton>
         </form>
       </div>
 

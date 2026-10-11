@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ActionSubmit } from "@/components/forms/ActionSubmit";
 import { approveUser } from "@/lib/auth/actions";
 import { requirePermission } from "@/lib/auth/session";
 import { ROLES, ROLE_DEFINITIONS, isRole } from "@/lib/auth/roles";
@@ -25,7 +26,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           <input type="hidden" name="user_id" value={user.user_id}/>
           <label className="text-xs text-[var(--ink-secondary)]"><span className="mb-1 block">Role</span><select name="role" defaultValue={requested} className={control}>{ROLES.map(r => <option key={r} value={r}>{ROLE_DEFINITIONS[r].label}</option>)}</select></label>
           <label className="text-xs text-[var(--ink-secondary)]"><span className="mb-1 block">Linked clinician</span><select name="provider_id" defaultValue={user.provider_id ?? ""} className={control}><option value="">Not a clinical account</option>{(providers ?? []).map(p => <option key={p.id} value={p.id}>{p.last_name}, {p.first_name} · {p.provider_type}</option>)}</select></label>
-          <button className="min-h-11 rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-white">{user.active ? "Update" : "Approve"}</button>
+          <ActionSubmit pendingLabel={user.active ? "Updating access…" : "Approving access…"}>{user.active ? "Update" : "Approve"}</ActionSubmit>
         </form>
       </article>})}{users?.length === 0 && <p className="card p-5 text-sm text-[var(--ink-secondary)]">No accounts have been created yet.</p>}</div>
   </div>;

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
 
+import { ActionSubmit } from "@/components/forms/ActionSubmit";
 import { approveOptimizationPlan } from "@/lib/scheduling/actions";
 
 export function ApprovalForm({
@@ -41,34 +42,14 @@ export function ApprovalForm({
           Review approval
         </button>
       ) : (
-        <div className="space-y-3" aria-live="polite">
-          <div className="rounded-xl bg-[var(--surface-sunken)] p-3 text-xs leading-relaxed text-[var(--ink-secondary)]">
-            <strong className="block text-[var(--ink-primary)]">Confirm {optionLabel}</strong>
-            {patientName} · {weekLabel} · {appointmentCount} new visit{appointmentCount === 1 ? "" : "s"} · +{addedHours}h
-          </div>
-          <label className="block">
-            <span className="text-xs font-medium text-[var(--ink-secondary)]">Approval reason</span>
-            <textarea
-              required
-              minLength={3}
-              name="reason"
-              autoFocus
-              placeholder="Document why this plan is being approved"
-              className="mt-1.5 min-h-20 w-full rounded-xl border border-[var(--border-ring)] bg-[var(--surface-1)] p-3 text-sm text-[var(--ink-primary)] outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
-            />
-          </label>
-          <Submit
-            count={appointmentCount}
-            label={`${optionLabel} for ${patientName}, ${weekLabel}`}
-          />
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            className="min-h-11 w-full rounded-full border border-[var(--border-ring)] px-5 text-sm font-medium text-[var(--ink-primary)]"
-          >
-            Go back
-          </button>
-        </div>
+        <ApprovalConfirmation
+          appointmentCount={appointmentCount}
+          addedHours={addedHours}
+          optionLabel={optionLabel}
+          patientName={patientName}
+          weekLabel={weekLabel}
+          onCancel={() => setConfirming(false)}
+        />
       )}
       <p className="text-[0.625rem] leading-relaxed text-[var(--ink-muted)]">
         Live constraints are checked again. If anything changed, the entire plan rolls back.
@@ -77,16 +58,62 @@ export function ApprovalForm({
   );
 }
 
-function Submit({ count, label }: { count: number; label: string }) {
+function ApprovalConfirmation({
+  appointmentCount,
+  addedHours,
+  optionLabel,
+  patientName,
+  weekLabel,
+  onCancel,
+}: {
+  appointmentCount: number;
+  addedHours: number;
+  optionLabel: string;
+  patientName: string;
+  weekLabel: string;
+  onCancel: () => void;
+}) {
   const { pending } = useFormStatus();
+
   return (
-    <button
-      type="submit"
+    <fieldset
       disabled={pending}
-      aria-label={pending ? "Rechecking the live schedule" : `Confirm approval of ${label}`}
-      className="min-h-11 w-full rounded-full bg-[var(--brand)] px-5 text-sm font-medium text-white disabled:cursor-wait disabled:opacity-60"
+      aria-busy={pending}
+      className="min-w-0 space-y-3 border-0 p-0 disabled:cursor-wait"
     >
-      {pending ? "Rechecking live schedule…" : `Approve ${count} appointment${count === 1 ? "" : "s"}`}
-    </button>
+      <div className="rounded-xl bg-[var(--surface-sunken)] p-3 text-xs leading-relaxed text-[var(--ink-secondary)]">
+        <strong className="block text-[var(--ink-primary)]">Confirm {optionLabel}</strong>
+        {patientName} · {weekLabel} · {appointmentCount} new visit
+        {appointmentCount === 1 ? "" : "s"} · +{addedHours}h
+      </div>
+      <label className="block">
+        <span className="text-xs font-medium text-[var(--ink-secondary)]">Approval reason</span>
+        <textarea
+          required
+          minLength={3}
+          name="reason"
+          autoFocus
+          placeholder="Document why this plan is being approved"
+          className="mt-1.5 min-h-20 w-full rounded-xl border border-[var(--border-ring)] bg-[var(--surface-1)] p-3 text-sm text-[var(--ink-primary)] outline-none disabled:cursor-wait disabled:opacity-70 focus:ring-2 focus:ring-[var(--brand-ring)]"
+        />
+      </label>
+      <ActionSubmit className="w-full" pendingLabel="Rechecking live schedule…">
+        Approve {appointmentCount} appointment{appointmentCount === 1 ? "" : "s"}
+      </ActionSubmit>
+      {pending && (
+        <p aria-hidden="true" className="text-center text-xs text-[var(--ink-secondary)]">
+          Checking live constraints. Keep this screen open.
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={pending}
+        aria-disabled={pending}
+        onClick={onCancel}
+        className="min-h-11 w-full rounded-full border border-[var(--border-ring)] px-5 text-sm font-medium text-[var(--ink-primary)] disabled:cursor-wait disabled:opacity-60"
+      >
+        Go back
+      </button>
+    </fieldset>
   );
 }

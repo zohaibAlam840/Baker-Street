@@ -1,12 +1,9 @@
+import { RouteLoading } from "@/components/shell/RouteLoading";
+
 export default function Loading() {
   return (
-    <main className="mx-auto max-w-7xl animate-pulse space-y-4 p-6" aria-label="Loading page">
-      <div className="h-8 w-56 rounded bg-[var(--surface-sunken)]" />
-      <div className="grid gap-4 md:grid-cols-3">
-        {Array.from({ length: 6 }, (_, index) => (
-          <div key={index} className="h-36 rounded-xl bg-[var(--surface-sunken)]" />
-        ))}
-      </div>
+    <main className="mx-auto min-h-dvh w-full max-w-7xl p-4 sm:p-6">
+      <RouteLoading label="Loading Baker Street" variant="overview" />
     </main>
   );
 }

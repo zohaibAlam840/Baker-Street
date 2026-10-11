@@ -349,7 +349,7 @@ export default async function PatientDetailPage({
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
           <CardHeader title="Intake readiness" sub={`${(intakeTasks??[]).filter(t=>t.completed).length}/${(intakeTasks??[]).length} complete`} />
-          <div className="mt-3 space-y-2">{(intakeTasks??[]).map(task=><form key={task.id} action={toggleIntakeTask} className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface-sunken)] p-3"><input type="hidden" name="task_id" value={task.id}/><input type="hidden" name="patient_id" value={patientId}/><input type="hidden" name="complete" value={String(!task.completed)}/><span className="text-sm">{task.completed?"✓ ":""}{task.label}</span>{can(session.role,"schedule.book")&&<button className="min-h-11 rounded-full border border-[var(--border-ring)] px-3 text-xs">{task.completed?"Reopen":"Complete"}</button>}</form>)}</div>
+          <div className="mt-3 space-y-2">{(intakeTasks??[]).map(task=><form key={task.id} action={toggleIntakeTask} className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface-sunken)] p-3"><input type="hidden" name="task_id" value={task.id}/><input type="hidden" name="patient_id" value={patientId}/><input type="hidden" name="complete" value={String(!task.completed)}/><span className="text-sm">{task.completed?"✓ ":""}{task.label}</span>{can(session.role,"schedule.book")&&<ActionSubmit tone="secondary" className="px-3 text-xs" pendingLabel={task.completed?"Reopening…":"Completing…"}>{task.completed?"Reopen":"Complete"}</ActionSubmit>}</form>)}</div>
         </Card>
         {canViewContacts && (
           <ContactsCard
