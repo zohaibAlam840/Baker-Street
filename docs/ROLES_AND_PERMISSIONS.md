@@ -203,11 +203,14 @@ target, or drops a required service**, needs `CLINICAL` approval.
 This is the approval threshold behind note 4. It is a clinical safety line, and
 it is cheap to implement now and painful to retrofit.
 
-The current multi-service optimizer only adds visits and marks any diagnostic
-plan that fails a required clinical minimum as non-approvable. Both Scheduler
-and Clinical roles can approve these additive plans. If plan search later gains
-the ability to move or remove existing care, the database transaction must also
-enforce `schedule.approve_reduction`; a hidden or disabled button is not enough.
+The current multi-service optimizer adds visits and can relocate one future
+in-person `FLEXIBLE` visit when that unlocks better clinical coverage. The database
+requires that move to preserve service, duration, authorization, status, and
+weekly hours, so both Scheduler and Clinical roles can approve it. Diagnostic
+plans that fail a required clinical minimum remain non-approvable. Cancellation
+or any future reduction still requires a separate database-enforced
+`schedule.approve_reduction` workflow; a hidden or disabled button is not
+enough.
 
 ### 3. Every override carries a reason, and the reason is permanent
 

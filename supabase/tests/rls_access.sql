@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set local search_path = public, extensions;
-select plan(160);
+select plan(200);
 
 select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnamespace = 'public'::regnamespace and relname = any(array[
   'patients','providers','appointments','authorizations','patient_service_requirements','patient_care_team','audit_log'
@@ -21,10 +21,27 @@ select extensions.ok(exists(select 1 from pg_constraint where conname='appointme
 select extensions.ok(exists(select 1 from pg_trigger where tgname='audit_appointment_change_trigger' and not tgisinternal), 'appointment changes are audited by a database trigger');
 select extensions.ok((select relrowsecurity from pg_class where oid='push_subscriptions'::regclass), 'push subscriptions have RLS enabled');
 select extensions.ok(to_regprocedure('approve_optimization_plan(uuid,date,date,text,jsonb,jsonb,text)') is not null, 'atomic optimizer approval function is installed');
+select extensions.ok(to_regprocedure('approve_optimization_plan_with_move(uuid,date,date,text,jsonb,jsonb,jsonb,text)') is not null, 'atomic move-enabled optimizer approval function is installed');
+select extensions.ok(has_function_privilege('authenticated','approve_optimization_plan_with_move(uuid,date,date,text,jsonb,jsonb,jsonb,text)','EXECUTE'), 'authorized reviewers can invoke move-enabled approval');
+select extensions.ok(position('scheduling_flexibility<>''FLEXIBLE''' in regexp_replace(pg_get_functiondef('approve_optimization_plan_with_move(uuid,date,date,text,jsonb,jsonb,jsonb,text)'::regprocedure),'\s+','','g'))>0, 'optimizer moves are limited to flexible appointments');
+select extensions.ok(position('start_time<=now()' in regexp_replace(pg_get_functiondef('approve_optimization_plan_with_move(uuid,date,date,text,jsonb,jsonb,jsonb,text)'::regprocedure),'\s+','','g'))>0, 'optimizer cannot move a visit after it starts');
+select extensions.ok((select relrowsecurity from pg_class where oid='optimization_plan_decisions'::regclass), 'optimizer plan decisions have RLS enabled');
+select extensions.ok(to_regprocedure('record_optimization_plan_decision(uuid,date,date,text,text,text,timestamptz,jsonb)') is not null, 'optimizer reject/defer command is installed');
+select extensions.ok(has_function_privilege('authenticated','record_optimization_plan_decision(uuid,date,date,text,text,text,timestamptz,jsonb)','EXECUTE'), 'authenticated decision owners can invoke reject/defer');
+select extensions.ok(not has_table_privilege('authenticated','optimization_plan_decisions','INSERT,UPDATE,DELETE'), 'optimizer decisions cannot bypass the guarded command');
+select extensions.ok(exists(select 1 from pg_trigger where tgname='guard_optimization_approval_decision_trigger' and not tgisinternal), 'approval is serialized against reject and defer decisions');
 select extensions.ok(to_regprocedure('create_appointment_series(jsonb,text)') is not null, 'atomic recurring booking function is installed');
 select extensions.ok(to_regprocedure('update_appointment_booking(uuid,uuid,uuid,timestamptz,timestamptz,appointment_status,scheduling_flexibility,jsonb,text)') is not null, 'atomic appointment update function is installed');
 select extensions.ok(to_regprocedure('optimization_busy_intervals(timestamptz,timestamptz)') is not null, 'PHI-free busy interval function is installed');
 select extensions.ok(to_regprocedure('app_schema_status()') is not null, 'deployment schema readiness function is installed');
+select extensions.ok(to_regprocedure('update_location_configuration(uuid,text,location_type,text,text,text,boolean)') is not null, 'atomic location configuration command is installed');
+select extensions.ok(to_regprocedure('update_resource_configuration(uuid,text,text,int,uuid,boolean)') is not null, 'atomic resource configuration command is installed');
+select extensions.ok(to_regprocedure('update_service_configuration(uuid,text,text,text,int[],int,text,boolean,boolean,boolean,boolean,boolean,uuid[])') is not null, 'atomic service configuration command is installed');
+select extensions.ok(has_function_privilege('authenticated','update_location_configuration(uuid,text,location_type,text,text,text,boolean)','EXECUTE'), 'authenticated administrators can invoke location configuration');
+select extensions.ok(has_function_privilege('authenticated','update_resource_configuration(uuid,text,text,int,uuid,boolean)','EXECUTE'), 'authenticated administrators can invoke resource configuration');
+select extensions.ok(has_function_privilege('authenticated','update_service_configuration(uuid,text,text,text,int[],int,text,boolean,boolean,boolean,boolean,boolean,uuid[])','EXECUTE'), 'authenticated administrators can invoke service configuration');
+select extensions.ok((select count(*)=5 from pg_trigger where tgname=any(array['locations_audit_trigger','resources_audit_trigger','services_audit_trigger','service_durations_audit_trigger','service_resources_audit_trigger']) and not tgisinternal), 'configuration changes are audited by database triggers');
+select extensions.ok((select bool_and(not has_table_privilege('authenticated',table_name,'INSERT,UPDATE,DELETE')) from unnest(array['locations','resources','services','service_durations','service_resources']) table_name), 'configuration writes cannot bypass the guarded commands');
 select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_appointment_linked_resources_trigger' and not tgisinternal), 'appointment resource integrity is checked at commit');
 select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_resource_link_removal_trigger' and not tgisinternal), 'required resource removal is checked at commit');
 select extensions.ok(exists(select 1 from information_schema.columns where table_schema='public' and table_name='appointments' and column_name='last_change_reason'), 'appointment changes retain their documented reason');
@@ -42,7 +59,7 @@ select extensions.ok(to_regprocedure('restore_cancelled_appointment(uuid,text,te
 select extensions.ok(to_regprocedure('withdraw_provider_callout(uuid,text,text)') is not null, 'provider callout withdrawal command is installed');
 select extensions.ok(to_regprocedure('release_locked_recovery_case(uuid,int,text)') is not null, 'locked recovery clinical release command is installed');
 select extensions.ok(to_regprocedure('provider_callout_intervals(timestamptz,timestamptz)') is not null, 'minimal callout interval reader is installed');
-select extensions.ok(app_schema_status()->>'version'='20261011031200' and (app_schema_status()->>'schedule_recovery')::boolean, 'deployment health reports schedule recovery ready');
+select extensions.ok(app_schema_status()->>'version'='20261021040000' and (app_schema_status()->>'schedule_recovery')::boolean and (app_schema_status()->>'configuration_writes')::boolean and (app_schema_status()->>'optimizer_decisions')::boolean and (app_schema_status()->>'optimizer_moves')::boolean, 'deployment health reports recovery, configuration writes, and optimizer decisions and moves ready');
 select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_provider_callout_guard_trigger' and not tgisinternal), 'provider callouts guard appointment writes');
 select extensions.ok(not has_table_privilege('authenticated','appointments','INSERT'), 'authenticated clients cannot directly insert appointments');
 select extensions.ok(not has_table_privilege('authenticated','appointments','UPDATE'), 'authenticated clients cannot directly update appointments');
@@ -61,9 +78,10 @@ select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnam
   'communication_consents','communication_consent_events','communication_jobs',
   'communication_delivery_attempts','communication_delivery_receipts','communication_idempotency',
   'communication_delivery_config','communication_destination_hash_keys',
-  'communication_destination_suppressions'
+  'communication_destination_suppressions','communication_receipt_tokens'
 ])), 'all communication tables have RLS enabled');
-select extensions.ok(app_schema_status()->>'version'='20261011031200' and (app_schema_status()->>'communications')::boolean, 'deployment health reports communications ready');
+select extensions.ok(app_schema_status()->>'version'='20261021040000' and (app_schema_status()->>'communications')::boolean and (app_schema_status()->>'communication_delivery')::boolean, 'deployment health reports communications and provider delivery ready');
+select extensions.ok((app_schema_status()->>'optimizer_moves')::boolean, 'deployment health reports move-enabled optimizer approval ready');
 select extensions.ok(to_regprocedure('save_patient_contact(uuid,uuid,text,text,text,text,text,boolean,boolean,boolean,text,text,text,time,time,boolean,int,text)') is not null, 'contact save command is installed');
 select extensions.ok(to_regprocedure('set_contact_channel_consent(uuid,communication_channel,boolean,text,int,text)') is not null, 'consent command is installed');
 select extensions.ok(to_regprocedure('queue_appointment_reminder(uuid,uuid,communication_channel,timestamptz,text)') is not null, 'appointment reminder command is installed');
@@ -90,6 +108,15 @@ select extensions.ok((select delivery_mode='RECORD_ONLY' from communication_deli
 select extensions.ok(exists(select 1 from pg_constraint where conrelid='communication_jobs'::regclass and pg_get_constraintdef(oid) like '%appointment-reminder-v1%'), 'communication jobs enforce fixed PHI-minimal templates');
 select extensions.ok((select count(*)=2 from information_schema.columns where table_schema='public' and table_name='communication_jobs' and column_name=any(array['last_receipt_at','last_receipt_precedence'])), 'communication jobs track monotonic receipt state');
 select extensions.ok(position($needle$j.status in ('queued','failed')$needle$ in lower(pg_get_functiondef('claim_communication_jobs(int,text)'::regprocedure)))>0, 'delivery worker claims due automatic retries as well as new jobs');
+select extensions.ok(not has_table_privilege('authenticated','communication_receipt_tokens','SELECT,INSERT,UPDATE,DELETE'), 'provider receipt correlation tokens are private');
+select extensions.ok(exists(select 1 from pg_trigger where tgname='communication_jobs_receipt_token_trigger' and not tgisinternal), 'new communication jobs receive an opaque callback token');
+select extensions.ok(to_regprocedure('communication_delivery_mode()') is not null, 'service worker can check the database delivery gate before claiming work');
+select extensions.ok(to_regprocedure('claim_communication_jobs_for_channels(int,text,communication_channel[])') is not null, 'channel-bounded communication claim command is installed');
+select extensions.ok(to_regprocedure('prepare_communication_provider_delivery(uuid,uuid)') is not null, 'provider preparation command is installed');
+select extensions.ok(to_regprocedure('record_communication_provider_receipt(uuid,text,text,communication_receipt_type,timestamptz,jsonb)') is not null, 'opaque provider receipt command is installed');
+select extensions.ok(to_regprocedure('record_communication_destination_receipt(communication_channel,text,text,text,communication_receipt_type,timestamptz,jsonb)') is not null, 'destination opt-out receipt command is installed');
+select extensions.ok(has_function_privilege('service_role','prepare_communication_provider_delivery(uuid,uuid)','EXECUTE'), 'service worker can prepare an approved provider delivery');
+select extensions.ok(not has_function_privilege('authenticated','record_communication_provider_receipt(uuid,text,text,communication_receipt_type,timestamptz,jsonb)','EXECUTE'), 'authenticated users cannot forge provider receipts');
 
 -- Exercise the actual policies under the authenticated Postgres role. Results
 -- are captured in a temp table and asserted after returning to postgres.
@@ -147,6 +174,90 @@ insert into services(
   '21000000-0000-0000-0000-000000000001','RLS-RECOVERY','RLS Recovery Service','Testing',
   60,60,60,true,true
 );
+insert into resources(id,name,resource_type,location_id,capacity)
+values('22000000-0000-0000-0000-000000000001','RLS Test Room','ROOM','20000000-0000-0000-0000-000000000001',1);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000005',true);
+select extensions.throws_ok($sql$
+  select update_location_configuration(
+    '20000000-0000-0000-0000-000000000001','Blocked Operations Edit','CLINIC',
+    'Boston','MA','America/New_York',true
+  )
+$sql$,'42501','System administrator access required','operations cannot commit configuration changes');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000006',true);
+select extensions.lives_ok($sql$
+  select update_location_configuration(
+    '20000000-0000-0000-0000-000000000001','RLS Test Clinic','CLINIC',
+    'Boston','MA','America/New_York',true
+  )
+$sql$,'administrator can update a location');
+select extensions.lives_ok($sql$
+  select update_resource_configuration(
+    '22000000-0000-0000-0000-000000000001','RLS Test Room','ROOM',2,
+    '20000000-0000-0000-0000-000000000001',true
+  )
+$sql$,'administrator can update a resource');
+select extensions.lives_ok($sql$
+  select update_service_configuration(
+    '21000000-0000-0000-0000-000000000001','RLS Recovery Service','RLS-RECOVERY','Testing',
+    array[30,60],60,'MAXIMIZE_SERVICE_HOURS',false,true,true,false,true,
+    array['22000000-0000-0000-0000-000000000001'::uuid]
+  )
+$sql$,'administrator can atomically update a service');
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(
+  (select count(distinct action)=3 from audit_log
+    where user_id='10000000-0000-0000-0000-000000000006'
+      and action=any(array['LOCATIONS_UPDATE','RESOURCES_UPDATE','SERVICES_UPDATE'])),
+  'administrator configuration changes are attributed in the audit log'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+select extensions.lives_ok($sql$
+  select record_optimization_plan_decision(
+    '40000000-0000-0000-0000-000000000001','2035-01-07','2035-01-13',
+    'pgtap-plan-1','REJECTED','Does not preserve the preferred provider',null,
+    '{"label":"RLS plan"}'::jsonb
+  )
+$sql$,'scheduler can reject a generated plan');
+select extensions.throws_ok($sql$
+  insert into optimization_requests(
+    requested_by,mode,patient_id,date_start,date_end,objective,allow_moves,
+    allow_provider_changes,allow_location_changes,max_solutions,status,solver_status,
+    request_payload,completed_at,approved_by,approved_at,decision_reason,idempotency_key
+  ) values (
+    '10000000-0000-0000-0000-000000000001','OPTIMIZE_PATIENT',
+    '40000000-0000-0000-0000-000000000001','2035-01-07','2035-01-13',
+    'MULTI_SERVICE_CLINICAL_COVERAGE',false,true,false,1,'COMPLETE','FEASIBLE',
+    '{"summary":{"plan_id":"pgtap-plan-1"}}'::jsonb,now(),
+    '10000000-0000-0000-0000-000000000001',now(),'Race test','pgtap-race-approval'
+  )
+$sql$,'P0001','Plan already has an active rejected decision','approval cannot race past an earlier rejection');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
+select extensions.is(
+  (record_optimization_plan_decision(
+    '40000000-0000-0000-0000-000000000001','2035-01-07','2035-01-13',
+    'pgtap-plan-1','DEFERRED','Review this tomorrow','2035-01-08 12:00+00',
+    '{"label":"RLS plan"}'::jsonb
+  )->>'already_decided')::boolean,
+  true,
+  'a concurrent later decision preserves the first active decision'
+);
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(exists(
+  select 1 from audit_log
+  where action='OPTIMIZATION_PLAN_REJECTED'
+    and patient_id='40000000-0000-0000-0000-000000000001'
+    and user_id='10000000-0000-0000-0000-000000000001'
+    and override_reason='Does not preserve the preferred provider'
+), 'optimizer plan decisions retain actor, patient, and reason in audit history');
+
 insert into appointments(
   id,patient_id,service_id,provider_id,location_id,start_time,end_time,status,
   scheduling_flexibility,telehealth,cancellation_reason,last_change_reason
@@ -488,6 +599,77 @@ select extensions.ok(not exists(
     and (coalesce(old_values,'{}'::jsonb) ?| array['name','phone','email','push_endpoint']
       or coalesce(new_values,'{}'::jsonb) ?| array['name','phone','email','push_endpoint'])
 ), 'contact audit history and new audit events contain no raw destination fields');
+
+-- Exercise the move wrapper, not just its privilege surface. The source move,
+-- added visit, result/change records, and audit event must share one commit.
+insert into provider_services(id,provider_id,service_id,eligible)
+values(
+  '23000000-0000-0000-0000-000000000001',
+  '30000000-0000-0000-0000-000000000002',
+  '21000000-0000-0000-0000-000000000001',true
+);
+insert into provider_availability(
+  id,provider_id,day_of_week,start_time,end_time,availability_type,location_id
+) values
+('24000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002',2,'08:00','18:00','CLINICAL','20000000-0000-0000-0000-000000000001'),
+('24000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000002',3,'08:00','18:00','CLINICAL','20000000-0000-0000-0000-000000000001');
+insert into patient_availability(
+  id,patient_id,day_of_week,start_time,end_time,availability_type
+) values
+('25000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',2,'08:00','18:00','AVAILABLE'),
+('25000000-0000-0000-0000-000000000002','40000000-0000-0000-0000-000000000001',3,'08:00','18:00','AVAILABLE');
+insert into appointments(
+  id,patient_id,service_id,provider_id,location_id,start_time,end_time,status,
+  scheduling_flexibility,telehealth,last_change_reason
+) values(
+  '26000000-0000-0000-0000-000000000001',
+  '40000000-0000-0000-0000-000000000001',
+  '21000000-0000-0000-0000-000000000001',
+  '30000000-0000-0000-0000-000000000002',
+  '20000000-0000-0000-0000-000000000001',
+  '2035-01-09 15:00+00','2035-01-09 16:00+00','SCHEDULED','FLEXIBLE',false,
+  'Optimizer move integration fixture'
+);
+insert into appointment_resources(appointment_id,resource_id) values(
+  '26000000-0000-0000-0000-000000000001',
+  '22000000-0000-0000-0000-000000000001'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+select extensions.lives_ok($sql$
+  select approve_optimization_plan_with_move(
+    '40000000-0000-0000-0000-000000000001','2035-01-08','2035-01-14',
+    'pgtap-move-approval',
+    '[{"service_id":"21000000-0000-0000-0000-000000000001","provider_id":"30000000-0000-0000-0000-000000000002","authorization_id":null,"location_id":"20000000-0000-0000-0000-000000000001","resource_ids":["22000000-0000-0000-0000-000000000001"],"telehealth":false,"start_time":"2035-01-10T15:00:00Z","end_time":"2035-01-10T16:00:00Z"}]'::jsonb,
+    '{"appointment_id":"26000000-0000-0000-0000-000000000001","service_id":"21000000-0000-0000-0000-000000000001","status":"SCHEDULED","flexibility":"FLEXIBLE","authorization_id":null,"telehealth":false,"old_start_time":"2035-01-09T15:00:00Z","old_end_time":"2035-01-09T16:00:00Z","old_provider_id":"30000000-0000-0000-0000-000000000002","old_location_id":"20000000-0000-0000-0000-000000000001","old_resource_ids":["22000000-0000-0000-0000-000000000001"],"new_start_time":"2035-01-09T17:00:00Z","new_end_time":"2035-01-09T18:00:00Z","new_provider_id":"30000000-0000-0000-0000-000000000002","new_location_id":"20000000-0000-0000-0000-000000000001","new_resource_ids":["22000000-0000-0000-0000-000000000001"]}'::jsonb,
+    '{"plan_id":"pgtap-move-plan","added_hours":1,"required_services_met":true,"provider_changes":0,"service_metrics":[]}'::jsonb,
+    'Move one flexible visit to unlock required care'
+  )
+$sql$,'move-enabled approval commits through the guarded transaction');
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(exists(
+  select 1 from appointments
+  where id='26000000-0000-0000-0000-000000000001'
+    and start_time='2035-01-09 17:00+00'
+    and original_start_time='2035-01-09 15:00+00'
+), 'move approval preserves the original time and applies the destination');
+select extensions.ok(exists(
+  select 1 from optimization_requests rq
+  join optimization_results rs on rs.optimization_request_id=rq.id
+  where rq.idempotency_key='pgtap-move-approval' and rq.allow_moves
+    and rs.appointments_added=1 and rs.appointments_moved=1
+    and (select count(*) from optimization_changes c
+      where c.optimization_result_id=rs.id and c.action in ('ADD','MOVE'))=2
+), 'move approval records one addition and one move in optimization history');
+select extensions.ok(exists(
+  select 1 from audit_log
+  where action='OPTIMIZATION_APPOINTMENT_MOVED'
+    and appointment_id='26000000-0000-0000-0000-000000000001'
+    and override_reason='Move one flexible visit to unlock required care'
+), 'move approval retains its actor-scoped reason in immutable audit history');
 
 select * from extensions.finish();
 rollback;

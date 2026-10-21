@@ -129,7 +129,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 {session.name}
               </span>
               <span className="block truncate text-[0.6875rem] text-[var(--ink-muted)]">
-                {definition.label}
+                Role: {definition.label}
               </span>
             </span>
             <form action={signOut}>
@@ -229,15 +229,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          {/* A source-neutral reminder of the access and safety boundary. */}
-          <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl bg-[var(--surface-sunken)] px-3 py-2 lg:mx-6">
+          {/* Keep the current access context visible on every desktop and mobile page. */}
+          <div className="mx-4 mb-2 flex min-w-0 items-center gap-2 rounded-xl bg-[var(--surface-sunken)] px-3 py-2 lg:mx-6">
             <span
               aria-hidden
               className="inline-block size-1.5 shrink-0 rounded-full"
               style={{ background: "var(--status-warning)" }}
             />
-            <p className="text-[0.6875rem] leading-tight text-[var(--ink-secondary)]">
-              Authenticated workspace · role-based access · scheduling constraints checked before changes.
+            <p className="min-w-0 text-[0.6875rem] leading-tight text-[var(--ink-secondary)]">
+              <span className="font-semibold text-[var(--ink-primary)]">
+                Current role: {definition.label}
+              </span>
+              <span className="hidden sm:inline">
+                {" "}· Authenticated workspace · access and scheduling constraints checked before changes.
+              </span>
             </p>
           </div>
 

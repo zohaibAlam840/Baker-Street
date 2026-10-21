@@ -16,8 +16,13 @@
 
 import { createHash } from "node:crypto";
 
-import { SLOT_MINUTES, slotsToHours } from "../domain/slots";
-import type { CandidateAppointment, UUID } from "../domain/types";
+import { SLOTS_PER_DAY, SLOT_MINUTES, slotsToHours } from "../domain/slots";
+import type {
+  AppointmentStatus,
+  CandidateAppointment,
+  SchedulingFlexibility,
+  UUID,
+} from "../domain/types";
 import { ScheduleContext } from "../rules/context";
 import { evaluateBooking } from "../rules/engine";
 import type { TravelModel } from "../rules/travel";
@@ -66,7 +71,10 @@ export interface OptimizedPlan {
   strategy: PlanStrategy;
   label: string;
   rationale: string;
+  /** New visits created by this option. */
   appointments: CandidateAppointment[];
+  /** Existing flexible visits relocated before the new visits are added. */
+  moves: OptimizedMove[];
   service_metrics: PlanServiceMetric[];
   added_hours: number;
   targets_met: number;
@@ -75,6 +83,21 @@ export interface OptimizedPlan {
   preferred_appointments: number;
   /** False plans are useful diagnostics but can never be submitted. */
   approvable: boolean;
+}
+
+export interface OptimizedMove {
+  appointment_id: UUID;
+  service_id: UUID;
+  status: AppointmentStatus;
+  flexibility: SchedulingFlexibility;
+  authorization_id: UUID | null;
+  telehealth: boolean;
+  old_start_slot: number;
+  old_end_slot: number;
+  old_provider_id: UUID;
+  old_location_id: UUID | null;
+  old_resource_ids: UUID[];
+  replacement: CandidateAppointment;
 }
 
 export interface OptimizationExplanation {
@@ -97,6 +120,8 @@ export interface PatientWeekOptimization {
     candidate_generation_truncated: boolean;
     search_reduced: boolean;
     search_limit_reached: boolean;
+    move_sources_considered: number;
+    move_destinations_considered: number;
     runtime_ms: number;
   };
 }
@@ -112,6 +137,13 @@ export interface OptimizePatientWeekRequest {
   start_step_slots?: number;
   /** Deterministic safety bound across candidate/state expansions per strategy. */
   max_search_operations?: number;
+  /** Explore bounded one-visit rearrangements when additions alone fall short. */
+  allow_moves?: boolean;
+  /** Deterministic safety bounds for move rescue exploration. */
+  max_move_sources?: number;
+  max_move_destinations?: number;
+  /** Do not suggest moving a visit that has started by this instant. */
+  move_not_before?: Date;
   travel?: TravelModel;
 }
 
@@ -169,6 +201,30 @@ export function optimizePatientWeek(
   request: OptimizePatientWeekRequest,
 ): PatientWeekOptimization {
   const started = Date.now();
+  const additionsOnly = optimizeAdditions(ctx, request);
+  if (
+    request.allow_moves === false ||
+    additionsOnly.status === "TARGETS_MET" ||
+    additionsOnly.goals.every((goal) => goal.addable_slots <= 0)
+  ) {
+    return additionsOnly;
+  }
+
+  const rescued = exploreMoveRescues(ctx, request, additionsOnly);
+  return {
+    ...rescued,
+    meta: {
+      ...rescued.meta,
+      runtime_ms: Date.now() - started,
+    },
+  };
+}
+
+function optimizeAdditions(
+  ctx: ScheduleContext,
+  request: OptimizePatientWeekRequest,
+): PatientWeekOptimization {
+  const started = Date.now();
   if (!ctx.patients.has(request.patient_id)) {
     throw new Error(`Unknown patient ${request.patient_id}`);
   }
@@ -191,6 +247,8 @@ export function optimizePatientWeek(
         candidate_generation_truncated: false,
         search_reduced: false,
         search_limit_reached: false,
+        move_sources_considered: 0,
+        move_destinations_considered: 0,
         runtime_ms: Date.now() - started,
       },
     };
@@ -265,6 +323,7 @@ export function optimizePatientWeek(
       label: strategy.label,
       rationale: strategy.rationale,
       appointments: legal,
+      moves: [],
       service_metrics: serviceMetrics,
       added_hours: round(
         legal.reduce((total, candidate) => total + slotsToHours(candidate.duration_slots), 0),
@@ -300,9 +359,276 @@ export function optimizePatientWeek(
       candidate_generation_truncated: generation.truncated,
       search_reduced: reduced.reduced,
       search_limit_reached: timeLimitReached,
+      move_sources_considered: 0,
+      move_destinations_considered: 0,
       runtime_ms: Date.now() - started,
     },
   };
+}
+
+/**
+ * Additions remain the default because they are least disruptive. When they
+ * cannot reach the configured targets, explore a deliberately small set of
+ * plans that relocate exactly one FLEXIBLE visit and then rerun the complete
+ * addition search against that hypothetical schedule. A one-move boundary
+ * keeps approval understandable and avoids hidden chains of patient changes.
+ */
+function exploreMoveRescues(
+  ctx: ScheduleContext,
+  request: OptimizePatientWeekRequest,
+  additionsOnly: PatientWeekOptimization,
+): PatientWeekOptimization {
+  const sourceLimit = Math.max(0, request.max_move_sources ?? 3);
+  const destinationLimit = Math.max(0, request.max_move_destinations ?? 2);
+  if (sourceLimit === 0 || destinationLimit === 0) return additionsOnly;
+
+  const movable = (ctx.appointmentsByPatient.get(request.patient_id) ?? [])
+    .filter(
+      (appointment) =>
+        appointment.scheduling_flexibility === "FLEXIBLE" &&
+        (appointment.status === "SCHEDULED" || appointment.status === "CONFIRMED") &&
+        appointment.provider_id != null &&
+        !appointment.telehealth &&
+        (!request.move_not_before ||
+          new Date(appointment.start_time).getTime() > request.move_not_before.getTime()),
+    )
+    .sort(
+      (a, b) =>
+        b.range.endSlot - b.range.startSlot - (a.range.endSlot - a.range.startSlot) ||
+        a.range.startSlot - b.range.startSlot ||
+        a.id.localeCompare(b.id),
+    );
+  const sources = movable.slice(0, sourceLimit);
+  const movePlans: OptimizedPlan[] = [];
+  let moveDestinationsConsidered = 0;
+  let generatedCandidates = additionsOnly.meta.generated_candidates;
+  let searchedCandidates = additionsOnly.meta.searched_candidates;
+  let rejectedCandidates = additionsOnly.meta.rejected_candidates;
+  let generationTruncated = additionsOnly.meta.candidate_generation_truncated;
+  let searchReduced = additionsOnly.meta.search_reduced;
+  let searchLimitReached = additionsOnly.meta.search_limit_reached;
+  const baseline = additionsOnly.plans[0];
+
+  for (const source of sources) {
+    const sourceProviderId = source.provider_id;
+    if (!sourceProviderId) continue;
+    const withoutSource = ctx.withoutAppointments(new Set([source.id]));
+    const generation = generateCandidates(withoutSource, {
+      patient_id: request.patient_id,
+      service_ids: [source.service_id],
+      durations: [(source.range.endSlot - source.range.startSlot) * SLOT_MINUTES],
+      includeExisting: false,
+      startStepSlots: request.start_step_slots ?? 2,
+      maxCandidates: 6_000,
+      minimumStartSlot: moveMinimumStartSlot(ctx, request.move_not_before),
+      travel: request.travel,
+    });
+    generatedCandidates += generation.candidates.length;
+    rejectedCandidates += generation.rejected;
+    generationTruncated ||= generation.truncated;
+
+    const legalDestinations = generation.candidates.filter(
+      (candidate) =>
+        candidate.authorization_id === source.authorization_id &&
+        !samePlacement(source, candidate),
+    );
+    const destinations = pickMoveDestinations(source, legalDestinations, destinationLimit);
+    moveDestinationsConsidered += destinations.length;
+    searchReduced ||= legalDestinations.length > destinations.length;
+
+    for (const replacement of destinations) {
+      const movedAppointment = {
+        ...candidateToAppointment(replacement, withoutSource),
+        id: source.id,
+        status: source.status,
+        scheduling_flexibility: source.scheduling_flexibility,
+        original_start_time: source.original_start_time,
+        original_provider_id: source.original_provider_id,
+        original_location_id: source.original_location_id,
+      };
+      const moved = withoutSource.withExtraAppointments(
+        [movedAppointment],
+        replacement.resource_ids.map((resource_id) => ({
+          appointment_id: source.id,
+          resource_id,
+        })),
+      );
+      const rescue = optimizeAdditions(moved, {
+        ...request,
+        allow_moves: false,
+        max_solutions: 1,
+        max_search_candidates: Math.min(request.max_search_candidates ?? 1_200, 1_200),
+        beam_width: Math.min(request.beam_width ?? 120, 120),
+        max_search_operations: Math.min(
+          request.max_search_operations ?? 150_000,
+          150_000,
+        ),
+      });
+      generatedCandidates += rescue.meta.generated_candidates;
+      searchedCandidates += rescue.meta.searched_candidates;
+      rejectedCandidates += rescue.meta.rejected_candidates;
+      generationTruncated ||= rescue.meta.candidate_generation_truncated;
+      searchReduced ||= rescue.meta.search_reduced;
+      searchLimitReached ||= rescue.meta.search_limit_reached;
+      const rescuedPlan = rescue.plans[0];
+      if (!rescuedPlan || !rescuedPlan.approvable) continue;
+      if (baseline && compareClinicalCoverage(rescuedPlan, baseline) <= 0) continue;
+
+      const move: OptimizedMove = {
+        appointment_id: source.id,
+        service_id: source.service_id,
+        status: source.status,
+        flexibility: source.scheduling_flexibility,
+        authorization_id: source.authorization_id,
+        telehealth: source.telehealth,
+        old_start_slot: source.range.startSlot,
+        old_end_slot: source.range.endSlot,
+        old_provider_id: sourceProviderId,
+        old_location_id: source.location_id,
+        old_resource_ids: [...source.resource_ids].sort(),
+        replacement,
+      };
+      movePlans.push({
+        ...rescuedPlan,
+        id: `plan_${stableHash(JSON.stringify({ base: rescuedPlan.id, move }))}`,
+        label: `${rescuedPlan.label} with one move`,
+        rationale: `${rescuedPlan.rationale} Relocates one flexible visit because additions alone leave more care uncovered.`,
+        moves: [move],
+        provider_changes:
+          rescuedPlan.provider_changes + Number(sourceProviderId !== replacement.provider_id),
+        preferred_appointments:
+          rescuedPlan.preferred_appointments +
+          Number((replacement.objective_values.preferred_provider ?? 0) > 0),
+      });
+    }
+  }
+
+  const plans = deduplicatePlans([...additionsOnly.plans, ...movePlans])
+    .sort(comparePlans)
+    .slice(0, request.max_solutions ?? 4);
+  const best = plans.find((plan) => plan.approvable);
+  const targetsMet = Boolean(best?.service_metrics.every((metric) => metric.target_met));
+  const explorationBounded =
+    movable.length > sources.length ||
+    searchReduced ||
+    generationTruncated ||
+    searchLimitReached;
+
+  return {
+    ...additionsOnly,
+    status: targetsMet
+      ? "TARGETS_MET"
+      : explorationBounded
+        ? "BOUNDED"
+        : best
+          ? "FEASIBLE"
+          : "INFEASIBLE",
+    plans,
+    explanations: explainShortfalls(additionsOnly.goals, best, {}),
+    meta: {
+      generated_candidates: generatedCandidates,
+      searched_candidates: searchedCandidates,
+      rejected_candidates: rejectedCandidates,
+      candidate_generation_truncated: generationTruncated,
+      search_reduced: searchReduced,
+      search_limit_reached: searchLimitReached,
+      move_sources_considered: sources.length,
+      move_destinations_considered: moveDestinationsConsidered,
+      runtime_ms: additionsOnly.meta.runtime_ms,
+    },
+  };
+}
+
+function moveMinimumStartSlot(ctx: ScheduleContext, notBefore: Date | undefined): number {
+  if (!notBefore) return 0;
+  const slot = ctx.grid.slotOf(notBefore);
+  if (slot != null) return Math.min(ctx.grid.totalSlots, slot + 1);
+  return notBefore < ctx.grid.dayStart(0) ? 0 : ctx.grid.totalSlots;
+}
+
+function samePlacement(
+  source: ScheduleContext["appointments"][number],
+  candidate: CandidateAppointment,
+): boolean {
+  return (
+    source.range.startSlot === candidate.start_slot &&
+    source.range.endSlot === candidate.end_slot &&
+    source.provider_id === candidate.provider_id &&
+    source.location_id === candidate.location_id &&
+    [...source.resource_ids].sort().join(",") === [...candidate.resource_ids].sort().join(",")
+  );
+}
+
+function pickMoveDestinations(
+  source: ScheduleContext["appointments"][number],
+  candidates: CandidateAppointment[],
+  limit: number,
+): CandidateAppointment[] {
+  const ordered = [...candidates].sort((a, b) => {
+    const aCost = moveDisruptionCost(source, a);
+    const bCost = moveDisruptionCost(source, b);
+    return aCost - bCost || candidateOrder(a, b);
+  });
+  if (ordered.length <= limit) return ordered;
+
+  const selected = [ordered[0]];
+  const sourceDay = Math.floor(source.range.startSlot / SLOTS_PER_DAY);
+  const differentDay = ordered.find(
+    (candidate) => Math.floor(candidate.start_slot / SLOTS_PER_DAY) !== sourceDay,
+  );
+  if (differentDay && selected.length < limit) selected.push(differentDay);
+  for (const candidate of ordered) {
+    if (selected.length >= limit) break;
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+  return selected;
+}
+
+function moveDisruptionCost(
+  source: ScheduleContext["appointments"][number],
+  candidate: CandidateAppointment,
+): number {
+  return (
+    Math.abs(candidate.start_slot - source.range.startSlot) +
+    Number(candidate.provider_id !== source.provider_id) * 10_000 +
+    Number(candidate.location_id !== source.location_id) * 5_000 +
+    Number(
+      [...candidate.resource_ids].sort().join(",") !== [...source.resource_ids].sort().join(","),
+    ) * 1_000
+  );
+}
+
+function compareClinicalCoverage(a: OptimizedPlan, b: OptimizedPlan): number {
+  const requiredMinimums = (plan: OptimizedPlan) =>
+    plan.service_metrics.filter((metric) => metric.required && metric.minimum_met).length;
+  const targetCoverage = (plan: OptimizedPlan) =>
+    plan.service_metrics.reduce(
+      (total, metric) => total + Math.min(metric.projected_hours, metric.target_hours),
+      0,
+    );
+  return (
+    Number(a.required_services_met) - Number(b.required_services_met) ||
+    requiredMinimums(a) - requiredMinimums(b) ||
+    a.targets_met - b.targets_met ||
+    targetCoverage(a) - targetCoverage(b) ||
+    a.added_hours - b.added_hours
+  );
+}
+
+function deduplicatePlans(plans: OptimizedPlan[]): OptimizedPlan[] {
+  const seen = new Set<string>();
+  return plans.filter((plan) => {
+    const signature = JSON.stringify({
+      appointments: plan.appointments.map((candidate) => candidate.candidate_id).sort(),
+      moves: plan.moves.map((move) => ({
+        appointment_id: move.appointment_id,
+        replacement: move.replacement.candidate_id,
+      })),
+    });
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
 }
 
 function buildGoals(ctx: ScheduleContext, request: OptimizePatientWeekRequest): ServiceGoal[] {
@@ -751,6 +1077,7 @@ function comparePlans(a: OptimizedPlan, b: OptimizedPlan): number {
     Number(b.required_services_met) - Number(a.required_services_met) ||
     b.targets_met - a.targets_met ||
     b.added_hours - a.added_hours ||
+    a.moves.length - b.moves.length ||
     a.provider_changes - b.provider_changes ||
     a.appointments.length - b.appointments.length ||
     a.id.localeCompare(b.id)

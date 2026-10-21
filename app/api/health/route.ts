@@ -4,7 +4,7 @@ import { logEvent } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
 
-const REQUIRED_SCHEMA_VERSION = "20261011031200";
+const REQUIRED_SCHEMA_VERSION = "20261021040000";
 
 type ComponentStatus = "available" | "degraded" | "unavailable" | "unconfigured";
 
@@ -12,10 +12,14 @@ interface SchemaStatus {
   ready?: boolean;
   version?: string;
   optimizer_approval?: boolean;
+  optimizer_moves?: boolean;
+  optimizer_decisions?: boolean;
   atomic_booking?: boolean;
   opaque_conflicts?: boolean;
   schedule_recovery?: boolean;
   communications?: boolean;
+  communication_delivery?: boolean;
+  configuration_writes?: boolean;
 }
 
 export async function GET() {
@@ -59,10 +63,14 @@ export async function GET() {
         schema?.ready === true &&
         schema.version === REQUIRED_SCHEMA_VERSION &&
         schema.optimizer_approval === true &&
+        schema.optimizer_moves === true &&
+        schema.optimizer_decisions === true &&
         schema.atomic_booking === true &&
         schema.opaque_conflicts === true &&
         schema.schedule_recovery === true &&
-        schema.communications === true;
+        schema.communications === true &&
+        schema.communication_delivery === true &&
+        schema.configuration_writes === true;
       database = schemaReady ? "available" : "degraded";
     }
   }

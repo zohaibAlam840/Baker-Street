@@ -239,6 +239,24 @@ export class ScheduleContext {
     });
   }
 
+  /**
+   * A new snapshot without the selected appointments. Move planning uses this
+   * to free only the source visit it is considering; every other patient,
+   * clinician, and resource commitment remains a hard constraint.
+   */
+  withoutAppointments(appointmentIds: ReadonlySet<UUID>): ScheduleContext {
+    if (appointmentIds.size === 0) return this;
+    return new ScheduleContext(this.grid, {
+      ...this.rows,
+      appointments: this.rows.appointments.filter(
+        (appointment) => !appointmentIds.has(appointment.id),
+      ),
+      appointmentResources: this.rows.appointmentResources.filter(
+        (resource) => !appointmentIds.has(resource.appointment_id),
+      ),
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Derived availability windows
   // -------------------------------------------------------------------------

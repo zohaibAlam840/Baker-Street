@@ -107,10 +107,11 @@ export function generateCandidates(
     (a, b) => a.localeCompare(b),
   );
 
-  // Existing appointments for the services being generated come first: the
-  // plan search needs them as candidates so it can decide to keep, move or
-  // drop them, and locked ones must be present or the model can schedule over
-  // them.
+  // Existing appointments for the services being generated come first for
+  // comparative analyses. Locked ones must be present so a caller can never
+  // mistake their time for movable capacity. The production optimizer's move
+  // rescue removes exactly one FLEXIBLE source in a cloned context; it never
+  // drops an existing visit.
   //
   // Appointments for OTHER services are deliberately left out. They are not
   // up for negotiation in this run, and they already constrain it through the
@@ -217,9 +218,9 @@ export function generateCandidates(
                 const { valid, violations } = evaluateBooking(proposal, ctx, {
                 travel: options.travel,
                 includeSoft: false,
-                // Existing appointments are candidates in their own right, so
-                // a new candidate is allowed to occupy their time — plan
-                // search decides which of the two survives.
+                // In comparative mode, non-locked in-scope visits are options
+                // in their own right, so alternatives may occupy their time.
+                // The caller must still pair one with an explicit source.
                 ignoreAppointmentIds: existingIds,
                 stopAfterFirstHard: true,
                 });

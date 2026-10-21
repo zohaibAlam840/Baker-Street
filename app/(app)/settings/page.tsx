@@ -82,13 +82,15 @@ export default async function SettingsPage() {
         />
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
-            "22-table schema covering patients, services, clinicians, rooms and authorizations",
+            "Relational schema covering patients, services, clinicians, rooms and authorizations",
             "Seventeen hard-constraint rules, each returning a reason rather than a refusal",
             "Ranked availability search with an explained score",
             "Deterministic candidate generation across providers, locations and resources",
             "Fill Service analysis with upper and lower bounds",
             "Bounded multi-service patient-week plans with stable plan identities",
             "Atomic human approval with live revalidation, idempotency and audit history",
+            "Atomic administrator configuration with future-booking safeguards and audit history",
+            "Consent-aware Twilio SMS and SendGrid email delivery with signed receipt reconciliation",
             "Infeasibility explanations ordered by what is actually binding",
             "Hiring and what-if simulation against an in-memory copy",
             "Supabase Auth and database-enforced access for seven scoped roles",
@@ -115,8 +117,7 @@ export default async function SettingsPage() {
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
             "No CP-SAT/global-optimum proof when bounded search cannot reach every target",
-            "Optimizer adds visits; it does not yet move or cancel existing appointments",
-            "No reject/defer workflow for generated plans yet",
+            "No optimizer cancellation, telehealth moves, or multi-move chains; rescue is limited to one future in-person FLEXIBLE visit",
             "No native iOS or Android package; the mobile experience is an installable PWA",
             "No billing claim submission or electronic health-record integration",
             "No language model — the assistant is a fixed-phrase parser",
@@ -144,6 +145,7 @@ export default async function SettingsPage() {
             "Apply every migration and run the PostgreSQL role and approval access suites",
             "Link every clinical account to a provider record and active care teams",
             "Use an eligible paid database plan with a signed business associate agreement",
+            "Approve communication providers, verify senders and signed webhooks, then enable both delivery gates",
             "Complete backup, rollback, monitoring and security review drills",
           ].map((step, index) => (
             <li key={step} className="flex gap-3">

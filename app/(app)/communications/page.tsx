@@ -39,6 +39,10 @@ interface PatientRow {
   external_id: string | null;
 }
 
+interface DeliveryModeRow {
+  delivery_mode: "RECORD_ONLY" | "LIVE";
+}
+
 const tabs: { id: QueueTab; label: string; statuses: string[] }[] = [
   { id: "attention", label: "Needs attention", statuses: ["FAILED", "SUPPRESSED", "EXPIRED"] },
   { id: "scheduled", label: "Queued", statuses: ["QUEUED", "PROCESSING", "SENT"] },
@@ -68,7 +72,14 @@ export default async function CommunicationsPage({
     .range(offset, offset + pageSize);
   if (channel) jobsQuery = jobsQuery.eq("channel", channel);
 
-  const jobsResult = await jobsQuery;
+  const [jobsResult, deliveryModeResult] = await Promise.all([
+    jobsQuery,
+    supabase
+      .from("communication_delivery_config")
+      .select("delivery_mode")
+      .eq("singleton", true)
+      .maybeSingle(),
+  ]);
   const loadedJobs = (jobsResult.data ?? []) as CommunicationJobRow[];
   const hasOlder = loadedJobs.length > pageSize;
   const jobs = loadedJobs.slice(0, pageSize);
@@ -86,6 +97,21 @@ export default async function CommunicationsPage({
   const patients = new Map(((patientsResult.data ?? []) as PatientRow[]).map((row) => [row.id, row]));
   const loadError = jobsResult.error || contactsResult.error || patientsResult.error;
   const canManage = can(session.role, "communications.manage");
+  const deliveryMode = (deliveryModeResult.data as DeliveryModeRow | null)?.delivery_mode ?? null;
+  const configuredChannels = [
+    process.env.TWILIO_ACCOUNT_SID &&
+    process.env.TWILIO_AUTH_TOKEN &&
+    (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_FROM_NUMBER)
+      ? "SMS"
+      : null,
+    process.env.SENDGRID_API_KEY &&
+    process.env.SENDGRID_FROM_EMAIL &&
+    process.env.SENDGRID_EVENT_WEBHOOK_PUBLIC_KEY
+      ? "email"
+      : null,
+  ].filter(Boolean) as string[];
+  const workerEnabled = process.env.COMMUNICATIONS_DELIVERY_ENABLED?.toLowerCase() === "true";
+  const deliveryActive = deliveryMode === "LIVE" && workerEnabled && configuredChannels.length > 0;
 
   return (
     <div className="space-y-5">
@@ -105,10 +131,24 @@ export default async function CommunicationsPage({
         </p>
       )}
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-        <p className="font-medium">Delivery provider not connected</p>
+      <div className={`rounded-2xl border p-4 text-sm ${deliveryActive ? "border-green-200 bg-green-50 text-green-950" : "border-amber-200 bg-amber-50 text-amber-950"}`}>
+        <p className="font-medium">
+          {deliveryActive
+            ? `Live ${configuredChannels.join(" and ")} delivery enabled`
+            : deliveryMode === "LIVE"
+              ? "Live database gate; worker is not fully enabled"
+              : deliveryMode === "RECORD_ONLY"
+                ? "Record-only delivery mode"
+                : "Delivery state is restricted for this role"}
+        </p>
         <p className="mt-1 text-xs leading-relaxed">
-          This release records contacts, consent and queued work. It does not send SMS or email yet; connect an approved provider with a signed business associate agreement before enabling delivery.
+          {deliveryActive
+            ? "The bounded server worker sends due work and signed provider callbacks reconcile delivery, failures, and opt-outs."
+            : deliveryMode === "LIVE"
+              ? "No work will be sent until the environment gate and at least one complete provider configuration are present."
+              : deliveryMode === "RECORD_ONLY"
+                ? "Contacts, consent, and queued work are recorded without sending a real SMS or email. Complete the approved-provider staging checklist before enabling both delivery gates."
+                : "Authorized operations staff can confirm the database delivery gate and provider rollout status."}
         </p>
       </div>
 

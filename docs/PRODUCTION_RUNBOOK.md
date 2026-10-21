@@ -10,6 +10,12 @@
 - `SCHEDULING_TIMEZONE` (an IANA zone, for example `America/New_York`)
 - `RELEASE_SHA` when the hosting platform does not supply `VERCEL_GIT_COMMIT_SHA`
 
+The live communications worker additionally requires `SUPABASE_SERVICE_ROLE_KEY`,
+`CRON_SECRET`, `COMMUNICATIONS_PUBLIC_BASE_URL`,
+`COMMUNICATIONS_DELIVERY_ENABLED`, and a complete Twilio and/or SendGrid
+configuration from `.env.example`. Webhook handlers require the corresponding
+provider verification secret even when the worker is temporarily disabled.
+
 Never expose the service-role key to the browser. It is only needed for controlled seed and administrative jobs.
 `USE_SYNTHETIC_DATA` must be absent or `false` in production.
 
@@ -39,7 +45,7 @@ The repository includes `Quality and security` and manually approved `Deploy pro
 
 After deployment, run `DEPLOYMENT_URL=https://example.org npm run verify:deployment`. It verifies database health, the login route, and required security headers.
 
-The deployment platform should poll `GET /api/health`. A `503` means the application cannot reach Supabase Auth or the database does not expose the required schema version, so that release should not receive traffic.
+The deployment platform should poll `GET /api/health`. A `503` means the application cannot reach Supabase Auth or the database does not expose the required schema version, including the atomic configuration and move-enabled optimizer commands, so that release should not receive traffic.
 
 ## Communications release checks
 
@@ -48,13 +54,16 @@ first release and verify contact authorization, relationship dates, consent,
 quiet hours, appointment/recovery source versions, role scoping, cancellation,
 and retry behavior before connecting a provider.
 
-The external worker must use only the service-role communication RPCs. Claim an
-opaque lease, call the prepare RPC immediately before sending, hash the
-destination in attempt records, and record outcomes and provider receipts by
-their idempotent IDs. Never log message bodies or destinations. Validate the
-provider's webhook signature before calling the receipt RPC. A delayed failure
-must never overwrite a delivered state; an opt-out or complaint must revoke the
-channel and cancel future actionable jobs.
+The included worker at `GET /api/communications/deliver` must be invoked with
+`Authorization: Bearer $CRON_SECRET`. It uses only service-role communication
+RPCs, claims an opaque lease, calls the prepare RPC immediately before sending,
+and records outcomes and provider receipts by idempotent IDs. Never log message
+bodies or destinations. Both webhook routes validate provider signatures before
+calling receipt RPCs. A delayed failure must never overwrite a delivered state;
+an opt-out or complaint must revoke the channel and cancel future actionable
+jobs. Register a recurring scheduler only after the staging matrix in
+`docs/COMMUNICATIONS.md` passes and both live-delivery gates are intentionally
+enabled.
 
 Run the seven-role read-only verification after applying the migration. Run the
 full pgTAP suite and mutation scenarios against staging, not production.

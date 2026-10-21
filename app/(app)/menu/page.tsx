@@ -43,7 +43,7 @@ export default async function MenuPage() {
             {session.name}
           </div>
           <div className="truncate text-xs text-[var(--ink-muted)]">
-            {definition.label} ·{" "}
+            Role: {definition.label} ·{" "}
             {definition.scope === "own"
               ? "own schedule"
               : definition.scope === "caseload"
@@ -89,7 +89,7 @@ export default async function MenuPage() {
           className="flex items-center justify-between px-4 py-3.5 active:bg-[var(--surface-sunken)]"
         >
           <span className="text-sm text-[var(--ink-primary)]">Switch role</span>
-          <span className="text-xs text-[var(--ink-muted)]">{definition.label}</span>
+          <span className="text-xs text-[var(--ink-muted)]">Role: {definition.label}</span>
         </Link>
         <Link
           href="/"

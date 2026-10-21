@@ -11,6 +11,7 @@ export function ApprovalForm({
   week,
   planId,
   appointmentCount,
+  moveCount,
   addedHours,
   optionLabel,
   patientName,
@@ -20,6 +21,7 @@ export function ApprovalForm({
   week: string;
   planId: string;
   appointmentCount: number;
+  moveCount: number;
   addedHours: number;
   optionLabel: string;
   patientName: string;
@@ -44,6 +46,7 @@ export function ApprovalForm({
       ) : (
         <ApprovalConfirmation
           appointmentCount={appointmentCount}
+          moveCount={moveCount}
           addedHours={addedHours}
           optionLabel={optionLabel}
           patientName={patientName}
@@ -60,6 +63,7 @@ export function ApprovalForm({
 
 function ApprovalConfirmation({
   appointmentCount,
+  moveCount,
   addedHours,
   optionLabel,
   patientName,
@@ -67,6 +71,7 @@ function ApprovalConfirmation({
   onCancel,
 }: {
   appointmentCount: number;
+  moveCount: number;
   addedHours: number;
   optionLabel: string;
   patientName: string;
@@ -84,7 +89,8 @@ function ApprovalConfirmation({
       <div className="rounded-xl bg-[var(--surface-sunken)] p-3 text-xs leading-relaxed text-[var(--ink-secondary)]">
         <strong className="block text-[var(--ink-primary)]">Confirm {optionLabel}</strong>
         {patientName} · {weekLabel} · {appointmentCount} new visit
-        {appointmentCount === 1 ? "" : "s"} · +{addedHours}h
+        {appointmentCount === 1 ? "" : "s"}
+        {moveCount > 0 && ` · ${moveCount} flexible visit moved`} · +{addedHours}h
       </div>
       <label className="block">
         <span className="text-xs font-medium text-[var(--ink-secondary)]">Approval reason</span>
@@ -98,7 +104,7 @@ function ApprovalConfirmation({
         />
       </label>
       <ActionSubmit className="w-full" pendingLabel="Rechecking live schedule…">
-        Approve {appointmentCount} appointment{appointmentCount === 1 ? "" : "s"}
+        Approve plan
       </ActionSubmit>
       {pending && (
         <p aria-hidden="true" className="text-center text-xs text-[var(--ink-secondary)]">

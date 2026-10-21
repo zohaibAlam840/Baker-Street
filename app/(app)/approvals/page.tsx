@@ -2,13 +2,19 @@ import Link from "next/link";
 
 import { Card, CardHeader } from "@/components/charts";
 import { ApprovalForm } from "@/components/optimizer/ApprovalForm";
+import { PlanDecisionForm } from "@/components/optimizer/PlanDecisionForm";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { SLOTS_PER_DAY, SLOT_MINUTES, slotsToHours } from "@/lib/domain/slots";
 import { addDays, formatClockTime } from "@/lib/domain/time";
 import { FlatTravelModel } from "@/lib/rules/travel";
+import {
+  activeGeneratedPlans,
+  type OptimizationPlanDecision,
+} from "@/lib/scheduling/decisions";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
 import { optimizePatientWeek } from "@/lib/scheduling/optimizer";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +28,7 @@ export default async function ApprovalsPage({
     patient?: string;
     error?: string;
     notice?: string;
+    view?: string;
   }>;
 }) {
   await requirePermission("schedule.optimize");
@@ -51,9 +58,30 @@ export default async function ApprovalsPage({
         patient_id: patientId,
         max_solutions: 5,
         start_step_slots: 1,
+        move_not_before: new Date(),
         travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
       })
     : null;
+  const view = params.view === "decided" ? "decided" : "active";
+  const supabase = await createClient();
+  const decisionResult = patientId
+    ? await supabase
+        .from("optimization_plan_decisions")
+        .select("id,plan_id,decision,reason,deferred_until,plan_summary,decided_by,version,created_at,updated_at")
+        .eq("patient_id", patientId)
+        .eq("date_start", ctx.grid.startDate)
+        .order("updated_at", { ascending: false })
+    : { data: [] as OptimizationPlanDecision[], error: null };
+  if (decisionResult.error) {
+    throw new Error(`Plan decision history could not be loaded: ${decisionResult.error.message}`);
+  }
+  const decisions = (decisionResult.data ?? []) as OptimizationPlanDecision[];
+  const activePlans = optimization
+    ? activeGeneratedPlans(optimization.plans, decisions, new Date())
+    : [];
+  const planRanks = new Map(
+    (optimization?.plans ?? []).map((plan, index) => [plan.id, index]),
+  );
 
   return (
     <div className="space-y-5">
@@ -68,6 +96,8 @@ export default async function ApprovalsPage({
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-[var(--ink-secondary)]">
             Required care is protected first. The engine then balances target hours,
             continuity, visit count, preferences, authorization, staff, rooms, and travel.
+            If additions alone fall short, it can compare bounded options that move one
+            existing flexible in-person visit.
           </p>
           <p className="mt-2 text-xs font-medium text-[var(--ink-muted)]">
             Week {weekLabel} · {ctx.grid.timeZone}
@@ -112,6 +142,23 @@ export default async function ApprovalsPage({
           Build plans
         </button>
       </form>
+
+      {patientId && (
+        <nav aria-label="Approval queue views" className="flex gap-2">
+          <Link
+            href={`/approvals?patient=${patientId}&week=${ctx.grid.startDate}`}
+            className={`min-h-11 rounded-full px-4 py-3 text-sm ${view === "active" ? "bg-[var(--brand)] text-white" : "border border-[var(--border-ring)]"}`}
+          >
+            Active options ({activePlans.length})
+          </Link>
+          <Link
+            href={`/approvals?patient=${patientId}&week=${ctx.grid.startDate}&view=decided`}
+            className={`min-h-11 rounded-full px-4 py-3 text-sm ${view === "decided" ? "bg-[var(--brand)] text-white" : "border border-[var(--border-ring)]"}`}
+          >
+            Decided ({decisions.length})
+          </Link>
+        </nav>
+      )}
 
       {!optimization || !patient ? (
         <Card>
@@ -164,7 +211,9 @@ export default async function ApprovalsPage({
             </ul>
           </section>
 
-          {optimization.plans.length === 0 && optimization.status === "TARGETS_MET" ? (
+          {view === "decided" ? (
+            <DecisionHistory decisions={decisions} />
+          ) : optimization.plans.length === 0 && optimization.status === "TARGETS_MET" ? (
             <Card>
               <CardHeader title="No changes needed" />
               <p className="mt-3 text-sm leading-relaxed text-[var(--ink-secondary)]">
@@ -179,9 +228,18 @@ export default async function ApprovalsPage({
                 availability, credentials, or capacity may need attention before another attempt.
               </p>
             </Card>
+          ) : activePlans.length === 0 ? (
+            <Card>
+              <CardHeader title="Every generated option has been reviewed" />
+              <p className="mt-3 text-sm leading-relaxed text-[var(--ink-secondary)]">
+                Rejected options stay in decision history. Deferred options return here automatically when their follow-up time is due.
+              </p>
+            </Card>
           ) : (
             <ol className="grid gap-4 xl:grid-cols-2">
-              {optimization.plans.map((plan, index) => (
+              {activePlans.map((plan) => {
+                const index = planRanks.get(plan.id) ?? 0;
+                return (
                 <li key={plan.id}>
                   <Card className={index === 0 ? "h-full ring-2 ring-[var(--brand-ring)]" : "h-full"}>
                     <div className="flex items-start justify-between gap-3">
@@ -201,7 +259,8 @@ export default async function ApprovalsPage({
                           +{plan.added_hours}h
                         </span>
                         <span className="text-[0.625rem] text-[var(--ink-muted)]">
-                          {plan.appointments.length} new visits
+                          {plan.appointments.length} new visit{plan.appointments.length === 1 ? "" : "s"}
+                          {plan.moves.length > 0 && ` · ${plan.moves.length} move`}
                         </span>
                       </span>
                     </div>
@@ -233,6 +292,35 @@ export default async function ApprovalsPage({
                         Diagnostic only: this plan does not preserve every required clinical minimum.
                       </p>
                     )}
+
+                    {plan.moves.map((move) => {
+                      const oldDay = Math.floor(move.old_start_slot / SLOTS_PER_DAY);
+                      const newDay = Math.floor(move.replacement.start_slot / SLOTS_PER_DAY);
+                      const oldProvider = ctx.providers.get(move.old_provider_id);
+                      const newProvider = ctx.providers.get(move.replacement.provider_id);
+                      const service = ctx.services.get(move.service_id);
+                      return (
+                        <section
+                          key={move.appointment_id}
+                          className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950"
+                        >
+                          <p className="font-semibold">Move one flexible visit before adding care</p>
+                          <p className="mt-1 leading-relaxed">
+                            {service?.service_name ?? "Service"}: {WEEKDAYS[ctx.grid.weekdayOf(oldDay)]}{" "}
+                            {formatClockTime((move.old_start_slot % SLOTS_PER_DAY) * SLOT_MINUTES)}
+                            {" → "}
+                            {WEEKDAYS[ctx.grid.weekdayOf(newDay)]}{" "}
+                            {formatClockTime((move.replacement.start_slot % SLOTS_PER_DAY) * SLOT_MINUTES)}
+                            {oldProvider?.id !== newProvider?.id && (
+                              <> · {oldProvider ? `${oldProvider.first_name} ${oldProvider.last_name}` : "Clinician"} → {newProvider ? `${newProvider.first_name} ${newProvider.last_name}` : "Clinician"}</>
+                            )}
+                          </p>
+                          <p className="mt-1 text-amber-800">
+                            The visit keeps the same service, duration, authorization, status, and clinical hours.
+                          </p>
+                        </section>
+                      );
+                    })}
 
                     <ul className="mt-4 divide-y divide-[var(--rule-hairline)]">
                       {plan.appointments.map((appointment) => {
@@ -280,15 +368,23 @@ export default async function ApprovalsPage({
                         week={ctx.grid.startDate}
                         planId={plan.id}
                         appointmentCount={plan.appointments.length}
+                        moveCount={plan.moves.length}
                         addedHours={plan.added_hours}
                         optionLabel={`Option ${index + 1}: ${plan.label}`}
                         patientName={`${patient.first_name} ${patient.last_name}`}
                         weekLabel={weekLabel}
                       />
                     )}
+                    <PlanDecisionForm
+                      patientId={patient.id}
+                      week={ctx.grid.startDate}
+                      weekEnd={addDays(ctx.grid.startDate, 6)}
+                      planId={plan.id}
+                    />
                   </Card>
                 </li>
-              ))}
+                );
+              })}
             </ol>
           )}
 
@@ -308,8 +404,9 @@ export default async function ApprovalsPage({
 
           <p className="text-xs leading-relaxed text-[var(--ink-muted)]">
             {optimization.meta.searched_candidates.toLocaleString()} legal candidates searched in {optimization.meta.runtime_ms}ms.
+            {optimization.meta.move_destinations_considered > 0 && ` ${optimization.meta.move_destinations_considered} bounded move destinations were compared.`}
             {optimization.status === "BOUNDED" && " The safety limit was reached, so this is the best plan found—not a claim that no better plan exists."}
-            {" "}Approval reloads live data, recomputes the selected option, and commits all appointments in one database transaction.
+            {" "}Approval reloads live data, recomputes the selected option, and commits its move and additions in one database transaction.
           </p>
         </>
       )}
@@ -337,5 +434,54 @@ function Metric({ label, value }: { label: string; value: string }) {
       <dt className="text-[0.625rem] text-[var(--ink-muted)]">{label}</dt>
       <dd className="mt-0.5 text-sm font-semibold tabular-nums text-[var(--ink-primary)]">{value}</dd>
     </div>
+  );
+}
+
+function DecisionHistory({ decisions }: { decisions: OptimizationPlanDecision[] }) {
+  if (decisions.length === 0) {
+    return (
+      <Card>
+        <CardHeader title="No plan decisions yet" />
+        <p className="mt-3 text-sm text-[var(--ink-secondary)]">
+          Rejected and deferred optimizer options will appear here with their reason and follow-up time.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <section className="space-y-3" aria-labelledby="decision-history-heading">
+      <h2 id="decision-history-heading" className="text-base font-semibold">Decision history</h2>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {decisions.map((decision) => {
+          const label = typeof decision.plan_summary.label === "string"
+            ? decision.plan_summary.label
+            : "Generated plan";
+          const due = decision.decision === "DEFERRED" && decision.deferred_until
+            ? new Date(decision.deferred_until)
+            : null;
+          return (
+            <Card key={decision.id}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">{label}</h3>
+                  <p className="mt-1 text-xs text-[var(--ink-secondary)]">
+                    {decision.reason}
+                  </p>
+                </div>
+                <span className="rounded-full bg-[var(--surface-sunken)] px-2.5 py-1 text-[0.6875rem] font-medium">
+                  {decision.decision === "DEFERRED" ? "Deferred" : "Rejected"}
+                </span>
+              </div>
+              <p className="mt-3 text-xs text-[var(--ink-muted)]">
+                Updated {new Date(decision.updated_at).toLocaleString()}
+                {due && ` · follow up ${due.toLocaleString()}`}
+                {decision.decided_by && ` · actor ${decision.decided_by.slice(0, 8)}`}
+              </p>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
   );
 }

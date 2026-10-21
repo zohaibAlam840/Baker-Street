@@ -28,11 +28,15 @@ async function main() {
   const { data: schema, error: schemaError } = await anonymous.rpc("app_schema_status");
   if (
     schemaError
-    || schema?.version !== "20261011031200"
+    || schema?.version !== "20261021040000"
+    || schema?.optimizer_moves !== true
+    || schema?.optimizer_decisions !== true
     || schema?.schedule_recovery !== true
     || schema?.communications !== true
+    || schema?.communication_delivery !== true
+    || schema?.configuration_writes !== true
   ) {
-    throw new Error("The linked database does not report the recovery and communications schemas as ready.");
+    throw new Error("The linked database does not report recovery, communications delivery, configuration writes, and optimizer decisions and moves as ready.");
   }
 
   for (const [expectedRole, email] of accounts) {

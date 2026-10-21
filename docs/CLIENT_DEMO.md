@@ -51,6 +51,9 @@ select John and compare the complete patient-week options. Point out the
 current-to-projected service metrics, required-care protection, rooms, provider
 continuity, and `BOUNDED` disclosure. Approval asks for a reason, reloads live
 data, recomputes the selected option, and commits every appointment or none.
+If additions alone cannot reach as much care, a plan may visibly relocate one
+future flexible visit; its before/after diff is approved in the same atomic
+transaction.
 
 **3. Explaining a no (§67).** Ask for 40 hours. Instead of "no solution":
 only 3h of authorization remain, 3h are held by protected appointments, only

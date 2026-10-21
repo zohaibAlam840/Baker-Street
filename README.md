@@ -15,10 +15,13 @@ patient and staff records they need.
   staff profiles.
 - Patient, provider, care-team, authorization, availability, appointment,
   resource, audit, work-queue, and reporting workflows.
+- Administrator-managed service, duration, location, room, and equipment
+  configuration with atomic writes, future-booking safeguards, and audit history.
 - Consent-aware patient and guardian contacts, appointment reminders, recovery
   outreach, delivery-state tracking, retries, opt-outs, and a mobile-first
-  communications queue. Delivery remains in record-only mode until an approved
-  email/SMS provider worker is configured.
+  communications queue. A bounded server-only worker supports Twilio SMS and
+  SendGrid email with signed receipt webhooks; delivery remains record-only by
+  default until both independent live-delivery gates are enabled.
 - Ranked availability and conflict checks backed by the same scheduling rules.
 - A focused single-service Fill Service analysis with honest lower and upper
   bounds.
@@ -29,15 +32,20 @@ patient and staff records they need.
   `INFEASIBLE`, and `BOUNDED` outcomes. `BOUNDED` means the safety limit was
   reached; it is not a claim of global optimality.
 - Human approval that reloads RLS-scoped data, recomputes the selected plan,
-  rejects stale options, and commits appointments, resources, the optimization
-  result, and audit history in one Postgres transaction.
+  rejects stale options, and commits additions, an optional one-visit move,
+  resources, the optimization result, and audit history in one Postgres
+  transaction.
+- Explicit reject and defer decisions for generated plans, with stable-plan
+  revalidation, follow-up queues, concurrency safety, and audit history.
 - Idempotent approvals, so a retried mobile request cannot add the same plan
   twice.
 
 This build does not include a CP-SAT service and therefore does not claim a
-global optimum when the bounded search cannot prove the target result. The
-optimizer currently adds visits; it does not rearrange or cancel existing
-appointments.
+global optimum when the bounded search cannot prove the target result. When
+additions alone fall short, the optimizer can compare plans that relocate one
+future in-person `FLEXIBLE` visit without changing its service, duration,
+authorization, status, or clinical hours. It does not cancel or reduce existing
+care.
 
 ## Local development
 
@@ -64,8 +72,11 @@ Apply every migration under `supabase/migrations` in order. Do not install only
 the original schema: later migrations add authentication profiles, care-team
 RLS, operational workflows, push subscriptions, schedule recovery,
 communications, and atomic optimizer approval.
-The service-role key is server-only and is needed only for controlled seed or
-administrative jobs; ordinary page reads use the signed-in user's session.
+The service-role key is server-only and is needed only for controlled seed,
+administrative jobs, and the communications worker/webhooks; ordinary page
+reads use the signed-in user's session. Copy `.env.example` for the complete
+communications configuration contract, and follow the communications runbook
+before enabling either live-delivery gate.
 
 Optional test-account seeding requires server-only
 `SUPABASE_SERVICE_ROLE_KEY` and `TEST_USER_PASSWORD`:
@@ -95,6 +106,7 @@ for release, rollback, monitoring, and post-deployment checks.
 - [Roles and permissions](docs/ROLES_AND_PERMISSIONS.md)
 - [Client demonstration guide](docs/CLIENT_DEMO.md)
 - [Communications and consent](docs/COMMUNICATIONS.md)
+- [Configuration writes](docs/CONFIGURATION.md)
 - [Production runbook](docs/PRODUCTION_RUNBOOK.md)
 
 ## Safety model

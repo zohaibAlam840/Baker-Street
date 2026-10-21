@@ -16,11 +16,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sendgrid/client": "^8.1.6",
+    "@sendgrid/eventwebhook": "^8.0.0",
+    "@sendgrid/mail": "^8.1.6",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.0",
     "next": "16.4.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "twilio": "^6.2.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

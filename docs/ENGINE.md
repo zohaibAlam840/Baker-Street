@@ -100,6 +100,13 @@ beam, and operation limits keep a server-rendered request responsive. A future
 CP-SAT service could consume the same candidates when global optimality or
 large-scale rearrangement becomes necessary.
 
+Generated options have an explicit human decision queue. A permitted scheduler
+or clinical supervisor may reject an option with a reason or defer it until a
+time later in the same scheduling week. The server recomputes the stable plan
+before recording the decision; active decisions are serialized in Postgres,
+cannot be overwritten by a concurrent reviewer, and are copied to the audit
+stream. Due deferrals return automatically to the active options view.
+
 ## Atomic human approval
 
 The optimizer proposes and a permitted person approves. The browser sends only
@@ -172,6 +179,16 @@ create and update appointments, configuration, clinical/payer records, and
 care-team assignments. The Plan optimizer compares complete alternatives and
 uses an explicit review/confirmation step before approval.
 
+When an additions-only plan leaves more required or target care uncovered, the
+optimizer may explore a bounded one-move rescue. It removes one future
+in-person `FLEXIBLE` visit from an in-memory clone, generates legal same-duration
+destinations, restores the visit in each clone, and reruns the multi-service
+search. A move is retained only when its clinical coverage is strictly better
+than the additions-only baseline. Approval recomputes that exact plan and the
+database compares the source visit's time, clinician, location, authorization,
+status, flexibility, and resources before committing the move and all additions
+in one transaction. Stale plans roll back without partial changes.
+
 Color never carries meaning alone. Calendar blocks retain labels and accessible
 state text, and wide views have table or horizontally scrollable equivalents
 for mobile use.
@@ -230,8 +247,12 @@ assert identical plan identities.
 
 - The bounded TypeScript optimizer does not prove a global optimum when it
   returns `FEASIBLE` or `BOUNDED`.
-- It adds appointments; moving/canceling existing appointments is not yet part
-  of plan search.
+- It adds appointments and, only when additions alone leave more care
+  uncovered, can compare a bounded set of plans that move one in-person
+  `FLEXIBLE` scheduled/confirmed visit. A move preserves service, duration,
+  authorization, status, and weekly clinical hours.
+- It does not cancel visits, reduce care, chain multiple moves, or rearrange
+  `PROTECTED`/`LOCKED` appointments.
 - Fill Service remains a focused greedy lower-bound/upper-bound analysis.
 - A native iOS/Android binary, EHR integration, claim submission, and a
   language model are not included.
