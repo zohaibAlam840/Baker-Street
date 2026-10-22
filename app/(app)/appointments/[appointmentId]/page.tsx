@@ -40,6 +40,15 @@ interface ReminderConsent {
   status: "GRANTED" | "REVOKED";
 }
 
+interface PendingReduction {
+  id: string;
+  scheduled_minutes_before: number;
+  scheduled_minutes_after: number;
+  target_minutes: number | null;
+  request_reason: string;
+  created_at: string;
+}
+
 export default async function AppointmentDetailPage({ params, searchParams }: {
   params: Promise<{ appointmentId: string }>;
   searchParams: Promise<{ error?: string; notice?: string }>;
@@ -91,8 +100,20 @@ export default async function AppointmentDetailPage({ params, searchParams }: {
     hour: "numeric",
     minute: "2-digit",
   });
+  const reductionResult = can(session.role, "schedule.book")
+    ? await supabase
+        .from("appointment_reduction_requests")
+        .select("id,scheduled_minutes_before,scheduled_minutes_after,target_minutes,request_reason,created_at")
+        .eq("appointment_id", appointment.id)
+        .eq("status", "PENDING")
+        .maybeSingle()
+    : { data: null, error: null };
+  const pendingReduction = reductionResult.data as PendingReduction | null;
+  const reductionCheckFailed = Boolean(reductionResult.error);
   const canEdit = can(session.role, "schedule.book")
-    && ["SCHEDULED", "CONFIRMED"].includes(appointment.status);
+    && ["SCHEDULED", "CONFIRMED"].includes(appointment.status)
+    && !pendingReduction
+    && !reductionCheckFailed;
   const canManageRecovery = can(session.role, "recovery.manage");
   const canCancel = canManageRecovery
     && ["SCHEDULED", "CONFIRMED"].includes(appointment.status);
@@ -192,6 +213,27 @@ export default async function AppointmentDetailPage({ params, searchParams }: {
 
         <div className="space-y-4">
           <Card><CardHeader title="Booking context" /><dl className="mt-4 space-y-3 text-sm"><Row label="Authorization" value={appointment.authorization_id ? "Linked" : "None"} /><Row label="Delivery" value={appointment.telehealth ? "Telehealth" : "In person"} /><Row label="Resources" value={resources.join(", ") || "None"} /><Row label="Timezone" value={displayTimeZone} /></dl></Card>
+
+          {pendingReduction && (
+            <Card>
+              <CardHeader title="Clinical review pending" sub="The appointment remains unchanged" />
+              <dl className="mt-4 space-y-3 text-sm">
+                <Row label="Current weekly care" value={`${pendingReduction.scheduled_minutes_before / 60}h`} />
+                <Row label="Proposed weekly care" value={`${pendingReduction.scheduled_minutes_after / 60}h`} />
+                <Row label="Clinical target" value={pendingReduction.target_minutes === null ? "Required service" : `${pendingReduction.target_minutes / 60}h`} />
+              </dl>
+              <p className="mt-3 text-xs leading-relaxed text-[var(--ink-secondary)]">{pendingReduction.request_reason}</p>
+              <Link href="/reductions" className="mt-4 grid min-h-11 place-items-center rounded-full border border-[var(--border-ring)] px-4 text-sm font-medium">Open reduction review</Link>
+            </Card>
+          )}
+
+          {reductionCheckFailed && can(session.role, "schedule.book") && (
+            <Card>
+              <CardHeader title="Editing temporarily unavailable" sub="Clinical review state could not be verified" />
+              <p className="mt-3 text-sm text-[var(--ink-secondary)]">Refresh before editing this appointment. No changes were made.</p>
+            </Card>
+          )}
+
           <Card><CardHeader title="Related records" /><div className="mt-4 grid gap-2 text-sm">{patient && <Link className="underline underline-offset-4" href={`/patients/${patient.id}?week=${ctx.grid.startDate}`}>Patient record</Link>}{provider && <Link className="underline underline-offset-4" href={`/providers/${provider.id}?week=${ctx.grid.startDate}`}>Clinician record</Link>}{appointment.authorization_id && <Link className="underline underline-offset-4" href={`/authorizations/${appointment.authorization_id}?week=${ctx.grid.startDate}`}>Authorization</Link>}</div></Card>
 
           {canQueueReminder && (

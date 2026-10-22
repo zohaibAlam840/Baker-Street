@@ -188,12 +188,19 @@ export async function updateAppointment(form: FormData) {
     }
   }
   if(!resourceIds) fail(path,lastMessage);
-  const { error } = await supabase.rpc("update_appointment_booking",{
+  const { data, error } = await supabase.rpc("update_appointment_booking",{
     p_appointment_id:id,p_provider_id:providerId,p_location_id:locationId,
     p_start_time:start.toISOString(),p_end_time:end.toISOString(),p_status:status,
     p_flexibility:flexibility,p_resource_ids:resourceIds,p_reason:reason,
   });
   if (error) fail(path, explainDatabaseError(error.message));
+  const result = data as { status?: string; request_id?: string } | null;
+  if (result?.status === "PENDING_REVIEW") {
+    revalidatePath(path);
+    revalidatePath("/reductions");
+    revalidatePath("/notifications");
+    done(path, "This change would put the service below its clinical target. The appointment was not changed and clinical review was requested.");
+  }
   if (session.role === "SCHEDULER") {
     await reconcileAppointmentReminders(supabase, [id]);
   }

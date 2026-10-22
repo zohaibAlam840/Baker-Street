@@ -118,6 +118,12 @@ export async function reportProviderCallout(form: FormData) {
   if (!["ILLNESS", "EMERGENCY", "PTO", "TRAINING", "OTHER"].includes(reasonCategory)) {
     fail(path, "Choose a callout reason category.");
   }
+  if (!canChooseProvider && ["PTO", "TRAINING"].includes(reasonCategory)) {
+    fail(path, "Planned PTO and training must be submitted through the time-off request queue.");
+  }
+  if (!canChooseProvider && start.getTime() > Date.now() + 24 * 60 * 60_000) {
+    fail(path, "Urgent self-reported callouts may start at most 24 hours ahead. Request planned time off instead.");
+  }
   if (operationalNote.length > 500) fail(path, "The operational note must be 500 characters or fewer.");
   requireConfirmation(form, path, "Confirm the callout and its affected visit cancellations.");
 

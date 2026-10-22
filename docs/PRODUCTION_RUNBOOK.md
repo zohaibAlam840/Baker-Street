@@ -45,7 +45,7 @@ The repository includes `Quality and security` and manually approved `Deploy pro
 
 After deployment, run `DEPLOYMENT_URL=https://example.org npm run verify:deployment`. It verifies database health, the login route, and required security headers.
 
-The deployment platform should poll `GET /api/health`. A `503` means the application cannot reach Supabase Auth or the database does not expose the required schema version, including the atomic configuration and move-enabled optimizer commands, so that release should not receive traffic.
+The deployment platform should poll `GET /api/health`. A `503` means the application cannot reach Supabase Auth or the database does not expose the required schema version, including atomic configuration, guarded access management, move-enabled optimization, clinical reduction review, and provider time-off commands, so that release should not receive traffic.
 
 ## Communications release checks
 
@@ -109,6 +109,40 @@ plan response, but do not approve a synthetic/test plan.
 4. Rotate the database password, service-role key, and VAPID keys before launch.
 5. Configure Auth redirect URLs for the production hostname only.
 6. Keep email confirmation disabled only if account approval remains mandatory.
+
+## Clinical reduction drill
+
+Before launch, use a non-production patient with an active weekly target. As a
+scheduler, shorten a visit enough to fall below target and verify the
+appointment remains unchanged while a request appears in `/reductions`. As the
+assigned clinical supervisor, reject one request and approve another. Confirm
+the rejected appointment is unchanged, the approved proposal is applied, and
+both reasons appear in the append-only audit log. Change an appointment after
+request creation and verify the later approval marks the request stale instead
+of applying it.
+
+## User access-management drill
+
+In staging, create a pending test account. As an Administrator, activate it
+with each relevant role and verify that Provider activation requires an active
+clinician link. Change the account to inactive and confirm its existing browser
+session is rejected on the next authenticated request. Verify each decision
+records the actor, old and new role/status, version, and reason in `audit_log`.
+Retry one submitted command and confirm it adds no duplicate audit event. Try a
+stale page version, a direct REST update, a self-demotion, and removal of the
+last active Administrator; all must fail without changing the profile.
+
+## Provider time-off drill
+
+In staging, sign in as a linked Provider and submit a future request that
+overlaps at least one scheduled visit. Confirm that the live schedule remains
+unchanged while the request is pending. As a Scheduler, reject one request and
+confirm that no disruption is created. Approve another and confirm in one
+transaction that the request is linked to a provider callout, overlapping
+visits are cancelled, recovery cases are opened, reminders are reconciled, and
+both actors and reasons appear in the audit log. Also verify that a Provider
+cannot read another provider's requests or approve their own request, and that
+direct writes to recurring provider availability are denied.
 
 ## Backup and restore drill
 

@@ -352,6 +352,7 @@ function CalloutForm({
   providerId?: string | null;
   providerTimezone?: string;
 }) {
+  const schedulerMode = providers !== undefined;
   return (
     <Card>
       <CardHeader title="Report provider callout" sub="Creates recovery cases for overlapping visits" />
@@ -376,8 +377,8 @@ function CalloutForm({
               <option value="" disabled>Choose reason</option>
               <option value="ILLNESS">Illness</option>
               <option value="EMERGENCY">Emergency</option>
-              <option value="PTO">PTO</option>
-              <option value="TRAINING">Training</option>
+              {schedulerMode && <option value="PTO">PTO</option>}
+              {schedulerMode && <option value="TRAINING">Training</option>}
               <option value="OTHER">Other</option>
             </select>
           </Field>
@@ -388,6 +389,11 @@ function CalloutForm({
             <input required name="end_time" type="datetime-local" className={inputClass} />
           </Field>
         </fieldset>
+        {!schedulerMode && (
+          <p className="rounded-xl bg-[var(--brand-tint)] p-3 text-xs text-[var(--ink-secondary)]">
+            This form is for urgent absences starting within 24 hours. Use <Link href="/time-off" className="font-medium text-[var(--brand)] underline underline-offset-4">Planned time off</Link> for PTO, training, or later dates.
+          </p>
+        )}
         <Field label="Operational note" hint="Optional, 500 characters. Do not enter a diagnosis or other medical detail.">
           <textarea name="operational_note" maxLength={500} className={`${inputClass} min-h-20`} placeholder="Coverage or handoff information only" />
         </Field>

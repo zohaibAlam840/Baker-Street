@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set local search_path = public, extensions;
-select plan(200);
+select plan(239);
 
 select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnamespace = 'public'::regnamespace and relname = any(array[
   'patients','providers','appointments','authorizations','patient_service_requirements','patient_care_team','audit_log'
@@ -32,6 +32,25 @@ select extensions.ok(not has_table_privilege('authenticated','optimization_plan_
 select extensions.ok(exists(select 1 from pg_trigger where tgname='guard_optimization_approval_decision_trigger' and not tgisinternal), 'approval is serialized against reject and defer decisions');
 select extensions.ok(to_regprocedure('create_appointment_series(jsonb,text)') is not null, 'atomic recurring booking function is installed');
 select extensions.ok(to_regprocedure('update_appointment_booking(uuid,uuid,uuid,timestamptz,timestamptz,appointment_status,scheduling_flexibility,jsonb,text)') is not null, 'atomic appointment update function is installed');
+select extensions.ok((select relrowsecurity from pg_class where oid='appointment_reduction_requests'::regclass), 'clinical reduction requests have RLS enabled');
+select extensions.ok(to_regprocedure('decide_appointment_reduction(uuid,int,text,text)') is not null, 'clinical reduction decision command is installed');
+select extensions.ok(has_function_privilege('authenticated','decide_appointment_reduction(uuid,int,text,text)','EXECUTE'), 'authenticated reviewers can invoke the guarded reduction decision command');
+select extensions.ok(not has_table_privilege('authenticated','appointment_reduction_requests','INSERT,UPDATE,DELETE'), 'reduction decisions cannot bypass the guarded commands');
+select extensions.ok((select relrowsecurity from pg_class where oid='provider_time_off_requests'::regclass), 'provider time-off requests have RLS enabled');
+select extensions.ok(to_regprocedure('request_provider_time_off(uuid,timestamptz,timestamptz,text,text,text)') is not null, 'provider time-off request command is installed');
+select extensions.ok(to_regprocedure('decide_provider_time_off_request(uuid,int,text,text)') is not null, 'provider time-off decision command is installed');
+select extensions.ok(to_regprocedure('cancel_provider_time_off_request(uuid,int,text)') is not null, 'provider time-off cancellation command is installed');
+select extensions.ok(has_function_privilege('authenticated','request_provider_time_off(uuid,timestamptz,timestamptz,text,text,text)','EXECUTE'), 'authenticated providers can invoke the guarded request command');
+select extensions.ok(not has_table_privilege('authenticated','provider_time_off_requests','INSERT,UPDATE,DELETE'), 'time-off mutations cannot bypass the guarded commands');
+select extensions.ok(not has_table_privilege('authenticated','provider_availability','INSERT,UPDATE,DELETE'), 'recurring provider availability cannot bypass time-off approval');
+select extensions.ok(to_regprocedure('guard_self_reported_provider_callout()') is not null, 'self-reported callout guard function is installed');
+select extensions.ok(exists(select 1 from pg_trigger where tgname='guard_self_reported_provider_callout_trigger' and not tgisinternal), 'provider callouts are protected by the planned-leave guard');
+select extensions.ok((select count(*)=1 from information_schema.columns where table_schema='public' and table_name='user_profiles' and column_name='version'), 'user profiles carry a concurrency version');
+select extensions.ok((select relrowsecurity from pg_class where oid='user_access_commands'::regclass), 'user access command ledger has RLS enabled');
+select extensions.ok(to_regprocedure('manage_user_access(uuid,int,app_role,uuid,boolean,text,text)') is not null, 'guarded user access command is installed');
+select extensions.ok(has_function_privilege('authenticated','manage_user_access(uuid,int,app_role,uuid,boolean,text,text)','EXECUTE'), 'authenticated administrators can invoke the guarded access command');
+select extensions.ok(not has_table_privilege('authenticated','user_profiles','INSERT,UPDATE,DELETE'), 'user access changes cannot bypass the guarded command');
+select extensions.ok(not has_table_privilege('authenticated','user_access_commands','SELECT,INSERT,UPDATE,DELETE'), 'user access replay ledger is private');
 select extensions.ok(to_regprocedure('optimization_busy_intervals(timestamptz,timestamptz)') is not null, 'PHI-free busy interval function is installed');
 select extensions.ok(to_regprocedure('app_schema_status()') is not null, 'deployment schema readiness function is installed');
 select extensions.ok(to_regprocedure('update_location_configuration(uuid,text,location_type,text,text,text,boolean)') is not null, 'atomic location configuration command is installed');
@@ -59,7 +78,7 @@ select extensions.ok(to_regprocedure('restore_cancelled_appointment(uuid,text,te
 select extensions.ok(to_regprocedure('withdraw_provider_callout(uuid,text,text)') is not null, 'provider callout withdrawal command is installed');
 select extensions.ok(to_regprocedure('release_locked_recovery_case(uuid,int,text)') is not null, 'locked recovery clinical release command is installed');
 select extensions.ok(to_regprocedure('provider_callout_intervals(timestamptz,timestamptz)') is not null, 'minimal callout interval reader is installed');
-select extensions.ok(app_schema_status()->>'version'='20261021040000' and (app_schema_status()->>'schedule_recovery')::boolean and (app_schema_status()->>'configuration_writes')::boolean and (app_schema_status()->>'optimizer_decisions')::boolean and (app_schema_status()->>'optimizer_moves')::boolean, 'deployment health reports recovery, configuration writes, and optimizer decisions and moves ready');
+select extensions.ok(app_schema_status()->>'version'='20261022040000' and (app_schema_status()->>'schedule_recovery')::boolean and (app_schema_status()->>'configuration_writes')::boolean and (app_schema_status()->>'optimizer_decisions')::boolean and (app_schema_status()->>'optimizer_moves')::boolean and (app_schema_status()->>'provider_time_off')::boolean and (app_schema_status()->>'provider_callout_guard')::boolean and (app_schema_status()->>'access_management')::boolean, 'deployment health reports recovery, time off, access management, configuration writes, and optimizer decisions and moves ready');
 select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_provider_callout_guard_trigger' and not tgisinternal), 'provider callouts guard appointment writes');
 select extensions.ok(not has_table_privilege('authenticated','appointments','INSERT'), 'authenticated clients cannot directly insert appointments');
 select extensions.ok(not has_table_privilege('authenticated','appointments','UPDATE'), 'authenticated clients cannot directly update appointments');
@@ -80,8 +99,9 @@ select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnam
   'communication_delivery_config','communication_destination_hash_keys',
   'communication_destination_suppressions','communication_receipt_tokens'
 ])), 'all communication tables have RLS enabled');
-select extensions.ok(app_schema_status()->>'version'='20261021040000' and (app_schema_status()->>'communications')::boolean and (app_schema_status()->>'communication_delivery')::boolean, 'deployment health reports communications and provider delivery ready');
+select extensions.ok(app_schema_status()->>'version'='20261022040000' and (app_schema_status()->>'communications')::boolean and (app_schema_status()->>'communication_delivery')::boolean, 'deployment health reports communications and provider delivery ready');
 select extensions.ok((app_schema_status()->>'optimizer_moves')::boolean, 'deployment health reports move-enabled optimizer approval ready');
+select extensions.ok(app_schema_status()->>'version'='20261022040000' and (app_schema_status()->>'clinical_reductions')::boolean, 'deployment health reports clinical reduction review ready');
 select extensions.ok(to_regprocedure('save_patient_contact(uuid,uuid,text,text,text,text,text,boolean,boolean,boolean,text,text,text,time,time,boolean,int,text)') is not null, 'contact save command is installed');
 select extensions.ok(to_regprocedure('set_contact_channel_consent(uuid,communication_channel,boolean,text,int,text)') is not null, 'consent command is installed');
 select extensions.ok(to_regprocedure('queue_appointment_reminder(uuid,uuid,communication_channel,timestamptz,text)') is not null, 'appointment reminder command is installed');
@@ -670,6 +690,203 @@ select extensions.ok(exists(
     and appointment_id='26000000-0000-0000-0000-000000000001'
     and override_reason='Move one flexible visit to unlock required care'
 ), 'move approval retains its actor-scoped reason in immutable audit history');
+
+-- A scheduler's planned edit remains unapplied when it would push an active
+-- service below target. The assigned clinical supervisor can then approve the
+-- exact stale-protected proposal through the guarded command.
+insert into patient_service_requirements(
+  patient_id,service_id,target_hours_per_week,required,effective_start
+) values(
+  '40000000-0000-0000-0000-000000000001',
+  '21000000-0000-0000-0000-000000000001',2,true,'2035-01-01'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+select extensions.is(
+  update_appointment_booking(
+    '26000000-0000-0000-0000-000000000001',
+    '30000000-0000-0000-0000-000000000002',
+    '20000000-0000-0000-0000-000000000001',
+    '2035-01-09 17:00+00','2035-01-09 17:30+00',
+    'SCHEDULED','FLEXIBLE',
+    '["22000000-0000-0000-0000-000000000001"]'::jsonb,
+    'Shorter visit requested by the family'
+  )->>'status',
+  'PENDING_REVIEW',
+  'scheduler reduction below target is queued instead of applied'
+);
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(exists(
+  select 1 from appointment_reduction_requests rr
+  join appointments a on a.id=rr.appointment_id
+  where rr.appointment_id='26000000-0000-0000-0000-000000000001'
+    and rr.status='PENDING' and rr.scheduled_minutes_before=120
+    and rr.scheduled_minutes_after=90 and rr.target_minutes=120
+    and a.end_time='2035-01-09 18:00+00'
+), 'pending reduction preserves the source appointment and records its clinical impact');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000002',true);
+select extensions.is(
+  decide_appointment_reduction(
+    (select id from appointment_reduction_requests
+      where appointment_id='26000000-0000-0000-0000-000000000001' and status='PENDING'),
+    1,'APPROVED','Clinically appropriate for this week'
+  )->>'status',
+  'APPROVED',
+  'assigned clinical supervisor can approve the exact pending reduction'
+);
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(exists(
+  select 1 from appointment_reduction_requests rr
+  join appointments a on a.id=rr.appointment_id
+  where rr.appointment_id='26000000-0000-0000-0000-000000000001'
+    and rr.status='APPROVED' and rr.reviewed_by='10000000-0000-0000-0000-000000000002'
+    and a.end_time='2035-01-09 17:30+00'
+) and exists(
+  select 1 from audit_log
+  where action='APPOINTMENT_REDUCTION_APPROVED'
+    and appointment_id='26000000-0000-0000-0000-000000000001'
+    and override_reason='Clinically appropriate for this week'
+), 'clinical approval atomically applies the proposal and retains its decision reason');
+
+-- Planned time off remains inert until Scheduler approval, then hands the
+-- exact window to the existing atomic callout/recovery transaction.
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000003',true);
+select extensions.is(
+  request_provider_time_off(
+    '30000000-0000-0000-0000-000000000002',
+    date_trunc('day',now()+interval '30 days')+interval '15 hours',
+    date_trunc('day',now()+interval '30 days')+interval '17 hours',
+    'PTO','Planned leave integration test','pgtap-provider-time-off'
+  )->>'status',
+  'PENDING',
+  'linked provider can submit a future time-off request'
+);
+select extensions.is(
+  (select count(*) from provider_time_off_requests)::bigint,
+  1::bigint,
+  'provider sees their own pending time-off request through RLS'
+);
+select extensions.throws_ok($sql$
+  select decide_provider_time_off_request(
+    (select id from provider_time_off_requests where idempotency_key='pgtap-provider-time-off'),
+    1,'APPROVED','Provider self approval must fail'
+  )
+$sql$,'P0001','Scheduler access required to decide time-off requests','provider cannot approve their own time-off request');
+select extensions.throws_ok($sql$
+  select report_provider_callout(
+    '30000000-0000-0000-0000-000000000002',
+    now()+interval '2 hours',now()+interval '3 hours',
+    'PTO','Planned leave must use approval','pgtap-block-direct-pto'
+  )
+$sql$,'P0001','Planned PTO and training must use the time-off request workflow','provider cannot bypass time-off approval with a PTO callout');
+select extensions.throws_ok($sql$
+  select report_provider_callout(
+    '30000000-0000-0000-0000-000000000002',
+    now()+interval '40 days',now()+interval '40 days 2 hours',
+    'EMERGENCY','Future callout must use approval','pgtap-block-future-callout'
+  )
+$sql$,'P0001','Urgent self-reported callouts may start at most 24 hours ahead','provider cannot bypass time-off approval with a distant future callout');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000005',true);
+select extensions.is(
+  (select count(*) from provider_time_off_requests)::bigint,
+  0::bigint,
+  'operations cannot read provider time-off requests'
+);
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+select extensions.is(
+  decide_provider_time_off_request(
+    (select id from provider_time_off_requests where idempotency_key='pgtap-provider-time-off'),
+    1,'APPROVED','Coverage reviewed for planned leave'
+  )->>'status',
+  'APPROVED',
+  'scheduler can approve and apply a pending time-off request'
+);
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(exists(
+  select 1 from provider_time_off_requests r
+  join schedule_disruptions sd on sd.id=r.disruption_id
+  where r.idempotency_key='pgtap-provider-time-off'
+    and r.status='APPROVED'
+    and r.reviewed_by='10000000-0000-0000-0000-000000000001'
+    and sd.provider_id=r.provider_id
+    and sd.starts_at=r.starts_at and sd.ends_at=r.ends_at
+) and exists(
+  select 1 from audit_log
+  where action='PROVIDER_TIME_OFF_APPROVED'
+    and override_reason='Coverage reviewed for planned leave'
+), 'time-off approval links the exact callout window and permanent audit reason');
+
+-- Administrator access changes are command-only, versioned, idempotent, and
+-- cannot remove the final active administrator.
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000006',true);
+select extensions.is(
+  manage_user_access(
+    '10000000-0000-0000-0000-000000000008',1,'OPERATIONS',null,true,
+    'Approved for operations reporting','pgtap-user-access-activate'
+  )->>'status',
+  'ACTIVE',
+  'administrator can activate a pending account through the guarded command'
+);
+select extensions.ok(exists(
+  select 1 from user_profiles
+  where user_id='10000000-0000-0000-0000-000000000008'
+    and active and role='OPERATIONS' and provider_id is null and version=2
+), 'access command applies the exact role, status, clinician link, and next version');
+select extensions.is(
+  manage_user_access(
+    '10000000-0000-0000-0000-000000000008',1,'OPERATIONS',null,true,
+    'Approved for operations reporting','pgtap-user-access-activate'
+  )->>'already_applied',
+  'true',
+  'retried access command returns its original result without a duplicate mutation'
+);
+select extensions.throws_ok($sql$
+  select manage_user_access(
+    '10000000-0000-0000-0000-000000000008',2,'PROVIDER',null,true,
+    'Provider access without a link must fail','pgtap-user-access-no-provider'
+  )
+$sql$,'P0001','Active provider accounts must be linked to a clinician','active provider access requires a clinician link');
+select extensions.throws_ok($sql$
+  select manage_user_access(
+    '10000000-0000-0000-0000-000000000006',1,'OPERATIONS',null,false,
+    'Attempt to remove the sole administrator','pgtap-user-access-last-admin'
+  )
+$sql$,'P0001','The last active administrator cannot be removed','last active administrator cannot be deactivated or demoted');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000005',true);
+select extensions.throws_ok($sql$
+  select manage_user_access(
+    '10000000-0000-0000-0000-000000000008',2,'OPERATIONS',null,false,
+    'Unauthorized access attempt','pgtap-user-access-unauthorized'
+  )
+$sql$,'P0001','System administrator access required','non-administrator cannot manage user access');
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+select extensions.ok(exists(
+  select 1 from audit_log
+  where user_id='10000000-0000-0000-0000-000000000006'
+    and action='USER_ACCESS_ACTIVATED'
+    and new_values->>'target_user_id'='10000000-0000-0000-0000-000000000008'
+    and new_values->>'role'='OPERATIONS'
+    and override_reason='Approved for operations reporting'
+) and (
+  select count(*) from audit_log
+  where action='USER_ACCESS_ACTIVATED'
+    and new_values->>'target_user_id'='10000000-0000-0000-0000-000000000008'
+)=1, 'access activation records one permanent actor-scoped reason across retries');
 
 select * from extensions.finish();
 rollback;

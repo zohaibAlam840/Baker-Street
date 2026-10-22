@@ -89,6 +89,9 @@ export default async function SettingsPage() {
             "Fill Service analysis with upper and lower bounds",
             "Bounded multi-service patient-week plans with stable plan identities",
             "Atomic human approval with live revalidation, idempotency and audit history",
+            "Clinical review for planned edits that reduce weekly care below target",
+            "Provider time-off requests with scheduler approval and automatic recovery work",
+            "Audited administrator access decisions with deactivation and last-admin safeguards",
             "Atomic administrator configuration with future-booking safeguards and audit history",
             "Consent-aware Twilio SMS and SendGrid email delivery with signed receipt reconciliation",
             "Infeasibility explanations ordered by what is actually binding",
@@ -117,7 +120,7 @@ export default async function SettingsPage() {
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
             "No CP-SAT/global-optimum proof when bounded search cannot reach every target",
-            "No optimizer cancellation, telehealth moves, or multi-move chains; rescue is limited to one future in-person FLEXIBLE visit",
+            "No optimizer cancellation, telehealth moves, or multi-move chains; planned reductions use a separate clinical review queue",
             "No native iOS or Android package; the mobile experience is an installable PWA",
             "No billing claim submission or electronic health-record integration",
             "No language model — the assistant is a fixed-phrase parser",

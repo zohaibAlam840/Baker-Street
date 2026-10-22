@@ -42,11 +42,46 @@ describe("communication permissions", () => {
   });
 });
 
+describe("clinical reduction permissions", () => {
+  it("keeps reduction decisions with clinical supervisors", () => {
+    expect(ROLES.filter((role) => can(role, "schedule.approve_reduction"))).toEqual([
+      "CLINICAL",
+    ]);
+    expect(navFor("CLINICAL").some((item) => item.href === "/reductions")).toBe(true);
+    expect(navFor("SCHEDULER").some((item) => item.href === "/reductions")).toBe(false);
+  });
+});
+
+describe("planned time-off permissions", () => {
+  it("lets providers request and only schedulers decide", () => {
+    expect(ROLES.filter((role) => can(role, "availability.request"))).toEqual([
+      "PROVIDER",
+    ]);
+    expect(ROLES.filter((role) => can(role, "availability.manage"))).toEqual([
+      "SCHEDULER",
+    ]);
+  });
+
+  it("shows the time-off queue only to its participants", () => {
+    expect(navFor("PROVIDER").some((item) => item.href === "/time-off")).toBe(true);
+    expect(navFor("SCHEDULER").some((item) => item.href === "/time-off")).toBe(true);
+    expect(navFor("CLINICAL").some((item) => item.href === "/time-off")).toBe(false);
+  });
+});
+
+describe("user access administration", () => {
+  it("keeps account activation and role changes with administrators", () => {
+    expect(ROLES.filter((role) => can(role, "users.manage"))).toEqual(["ADMIN"]);
+    expect(navFor("ADMIN").some((item) => item.href === "/configuration")).toBe(true);
+    expect(navFor("OPERATIONS").some((item) => item.href === "/configuration")).toBe(false);
+  });
+});
+
 describe("mobile primary navigation", () => {
   it.each([
     ["SCHEDULER", ["/dashboard", "/schedule", "/recovery", "/communications"]],
     ["CLINICAL", ["/dashboard", "/schedule", "/recovery", "/patients"]],
-    ["PROVIDER", ["/dashboard", "/schedule", "/recovery", "/notifications"]],
+    ["PROVIDER", ["/dashboard", "/schedule", "/time-off", "/recovery"]],
     ["AUTHORIZATION", ["/dashboard", "/schedule", "/authorizations", "/notifications"]],
     ["OPERATIONS", ["/dashboard", "/schedule", "/capacity", "/reports"]],
     ["ADMIN", ["/dashboard", "/configuration", "/audit", "/settings"]],

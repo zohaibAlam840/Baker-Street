@@ -207,10 +207,13 @@ The current multi-service optimizer adds visits and can relocate one future
 in-person `FLEXIBLE` visit when that unlocks better clinical coverage. The database
 requires that move to preserve service, duration, authorization, status, and
 weekly hours, so both Scheduler and Clinical roles can approve it. Diagnostic
-plans that fail a required clinical minimum remain non-approvable. Cancellation
-or any future reduction still requires a separate database-enforced
-`schedule.approve_reduction` workflow; a hidden or disabled button is not
-enough.
+plans that fail a required clinical minimum remain non-approvable. The
+optimizer still cannot cancel or reduce care. Planned manual edits that move
+care out of the week or shorten a visit now enter the separate,
+database-enforced `schedule.approve_reduction` workflow whenever the resulting
+service falls below target or loses its final required visit. Real patient
+cancellations remain immediate operational events and use the clinical closure
+guard in Schedule Recovery.
 
 ### 3. Every override carries a reason, and the reason is permanent
 
@@ -331,6 +334,12 @@ The role model above is now live in the application.
 - `lib/scheduling/actions.ts` and
   `20261011030900_optimizer_approval.sql` — stale-plan recomputation,
   idempotency, transactional approval, and linked audit history.
+- `app/(app)/time-off`, `lib/availability/actions.ts`, and
+  `20261022020000_provider_time_off_requests.sql` provide provider-owned
+  requests, scheduler decisions, and atomic handoff into schedule recovery.
+- `app/(app)/configuration/users`, `lib/auth/actions.ts`, and
+  `20261022040000_user_access_management.sql` provide audited activation,
+  deactivation, role assignment, concurrency protection, and last-admin safety.
 
 Verified access matrix (`OK` = page renders, `blocked` = redirected):
 
@@ -360,9 +369,12 @@ avoids collisions without disclosing another caseload.
    whether staff need more than one role.
 2. Whether Supabase email/password remains the production identity system or
    is replaced by the practice's SSO provider.
-3. A visible reject/defer workflow; the permission exists, while the current
-   Plan optimizer exposes approval only.
-4. Clinical reduction approval before any future optimizer is allowed to move
-   or remove existing care.
+3. Whether a reduction threshold should use the clinical target, minimum, or
+   another client-approved policy. The implemented default is the target.
+4. Whether a future optimizer may ever propose cancellations or reductions;
+   it currently cannot, and manual reductions use a separate clinical queue.
 5. Final production RLS/approval penetration tests, operational ownership, and
    healthcare compliance sign-off.
+6. Confirm how much advance notice planned time off normally requires, whether
+   Scheduler is the final approver, and whether windows longer than 14 days
+   should be split or use a separate leave process.

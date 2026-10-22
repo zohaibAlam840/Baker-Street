@@ -291,6 +291,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: "clipboard",
   },
   {
+    href: "/time-off",
+    label: "Planned time off",
+    short: "Time off",
+    requires: ["availability.manage", "availability.request"],
+    description: "Request and review planned clinician absences",
+    icon: "calendar",
+  },
+  {
     href: "/communications",
     label: "Communications",
     short: "Messages",
@@ -352,6 +360,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     short: "Plans",
     requires: ["schedule.optimize"],
     description: "Build, compare and safely approve multi-service plans",
+    icon: "clipboard",
+  },
+  {
+    href: "/reductions",
+    label: "Reduction review",
+    short: "Review",
+    requires: ["schedule.approve_reduction"],
+    description: "Approve or reject changes that lower clinical care",
     icon: "clipboard",
   },
   {
@@ -445,7 +461,7 @@ export function primaryNavFor(role: Role | null): NavItem[] {
   const preferredHrefs: Record<Role, readonly string[]> = {
     SCHEDULER: ["/dashboard", "/schedule", "/recovery", "/communications"],
     CLINICAL: ["/dashboard", "/schedule", "/recovery", "/patients"],
-    PROVIDER: ["/dashboard", "/schedule", "/recovery", "/notifications"],
+    PROVIDER: ["/dashboard", "/schedule", "/time-off", "/recovery"],
     AUTHORIZATION: ["/dashboard", "/schedule", "/authorizations", "/notifications"],
     OPERATIONS: ["/dashboard", "/schedule", "/capacity", "/reports"],
     ADMIN: ["/dashboard", "/configuration", "/audit", "/settings"],

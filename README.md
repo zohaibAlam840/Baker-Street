@@ -39,6 +39,16 @@ patient and staff records they need.
   revalidation, follow-up queues, concurrency safety, and audit history.
 - Idempotent approvals, so a retried mobile request cannot add the same plan
   twice.
+- Database-enforced clinical reduction review. Routine appointment moves stay
+  immediate, while a scheduler's edit that would lower a service below its
+  weekly target remains unapplied until an assigned clinical supervisor
+  approves the exact, stale-protected proposal.
+- Planned provider time-off requests with scheduler approval. Approval reuses
+  the atomic callout transaction to block the exact window, cancel overlapping
+  active visits, and open schedule-recovery work without a second data entry.
+- Guarded administrator access management with activation, deactivation,
+  clinician-link validation, stale-version protection, last-admin safety, and
+  permanent decision reasons.
 
 This build does not include a CP-SAT service and therefore does not claim a
 global optimum when the bounded search cannot prove the target result. When
@@ -107,6 +117,9 @@ for release, rollback, monitoring, and post-deployment checks.
 - [Client demonstration guide](docs/CLIENT_DEMO.md)
 - [Communications and consent](docs/COMMUNICATIONS.md)
 - [Configuration writes](docs/CONFIGURATION.md)
+- [Clinical reduction review](docs/CLINICAL_REDUCTIONS.md)
+- [Provider time off](docs/TIME_OFF.md)
+- [User access management](docs/ACCESS_MANAGEMENT.md)
 - [Production runbook](docs/PRODUCTION_RUNBOOK.md)
 
 ## Safety model

@@ -1,4 +1,4 @@
-const REQUIRED_SCHEMA_VERSION = "20261021040000";
+const REQUIRED_SCHEMA_VERSION = "20261022040000";
 
 interface HealthBody {
   status?: string;
