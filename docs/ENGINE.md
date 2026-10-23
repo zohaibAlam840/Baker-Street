@@ -2,8 +2,9 @@
 
 The application implements the scheduling foundation, deterministic
 multi-service plan generation, and human approval workflow described in
-*Dynamic Scheduler for BSH-1.docx* v2.0. AI does not decide a schedule, and
-this implementation does not claim to be a CP-SAT/global-optimum solver.
+*Dynamic Scheduler for BSH-1.docx* v2.0. AI does not decide a schedule. An
+optional private CP-SAT service can prove the generated additions model while
+the same human approval and database safeguards remain authoritative.
 
 ## The rule that shapes everything
 
@@ -78,9 +79,10 @@ together. It:
    locations, legal durations, authorizations, and alternative rooms/resources.
 3. Rejects candidates that fail the shared rule engine, including DST-invalid
    wall-clock ranges.
-4. Searches a deterministic bounded beam under several objective orders:
-   balanced coverage, continuity, fewest visits, preferences, and earliest
-   completion.
+4. Sends the PHI-minimized integer model to authenticated Google OR-Tools
+   CP-SAT when configured; otherwise searches the deterministic bounded beam.
+   Both use balanced coverage, continuity, fewest visits, preferences, and
+   earliest completion objective orders.
 5. Re-proves every selected appointment together against a progressively
    updated snapshot before returning a plan.
 6. Produces stable plan IDs from canonical clinical goals, selected
@@ -95,10 +97,11 @@ The result status is intentionally explicit:
 | `INFEASIBLE` | No addable legal plan was found for the current snapshot. |
 | `BOUNDED` | A safety limit was reached; this is the best plan found, not proof that no better plan exists. |
 
-This is a real multi-service optimizer, but it is not CP-SAT. Search candidate,
-beam, and operation limits keep a server-rendered request responsive. A future
-CP-SAT service could consume the same candidates when global optimality or
-large-scale rearrangement becomes necessary.
+The CP-SAT service receives opaque IDs and integer constraints, never patient
+names, contacts, diagnoses, free text, database credentials, locations, or
+resources. Every returned selection is re-proved by the TypeScript rules. If
+the service is disabled or unavailable, the bounded local engine remains the
+safe default. See [CP-SAT service](CP_SAT_SOLVER.md).
 
 Generated options have an explicit human decision queue. A permitted scheduler
 or clinical supervisor may reject an option with a reason or defer it until a
@@ -245,8 +248,9 @@ assert identical plan identities.
 
 ## Current boundaries
 
-- The bounded TypeScript optimizer does not prove a global optimum when it
-  returns `FEASIBLE` or `BOUNDED`.
+- CP-SAT proves optimality only over a complete generated additions candidate
+  set. Candidate truncation/reduction, time limits, fallback, and move rescue
+  remain honestly bounded.
 - It adds appointments and, only when additions alone leave more care
   uncovered, can compare a bounded set of plans that move one in-person
   `FLEXIBLE` scheduled/confirmed visit. A move preserves service, duration,
@@ -254,7 +258,12 @@ assert identical plan identities.
 - It does not cancel visits, reduce care, chain multiple moves, or rearrange
   `PROTECTED`/`LOCKED` appointments.
 - Fill Service remains a focused greedy lower-bound/upper-bound analysis.
-- A native iOS/Android binary, EHR integration, claim submission, and a
-  language model are not included.
+- The mobile PWA, safe offline boundary, install flow, and Android/iOS verified
+  link endpoints are included. Store-signed binaries still require the client's
+  final domain, developer accounts, package identities, and signing material.
+  FHIR R4 EHR and Claim drafts plus authenticated adapters are present; vendor
+  writes and live claims remain disabled pending approved mappings. Optional
+  model interpretation is gated by PHI approval and can never replace
+  rule-engine results.
 - Synthetic data is available for demonstrations, but production readiness
   still requires the controls and drills in `docs/PRODUCTION_RUNBOOK.md`.

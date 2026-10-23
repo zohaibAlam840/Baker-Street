@@ -67,17 +67,19 @@ the capacity engine exists to make.
 
 ## What to say about the AI
 
-The assistant is a **deterministic parser over fixed phrasings** — no language
-model is connected. That is deliberate for this build and the screen says so.
-What it demonstrates is the architecture the spec insists on (§59): language
-translates a request, the engine decides. Swapping in a real model replaces one
-file, `lib/ai/interpret.ts`, and nothing else moves.
+The deterministic parser runs first. An optional, explicitly PHI-approved
+language-model endpoint can interpret low-confidence phrasing after entity
+tokenization and redaction. Strict structured output maps only supplied
+patient/service tokens; any failure falls back locally. In both cases, language
+translates a request and the scheduling engine decides the answer.
 
 ## Be straight about
 
 - Authorized workflows do write. Plan approval is human-initiated, recomputed
   from current RLS-scoped data, revalidated in Postgres, and atomic.
-- The multi-service optimizer is a deterministic bounded search, not CP-SAT.
+- The multi-service optimizer uses authenticated CP-SAT when configured and
+  falls back to deterministic bounded search. The screen states when a result
+  is bounded and only claims optimality for a complete proven additions model.
   `BOUNDED` and `FEASIBLE` are not claims of global optimality.
 - Fill Service is intentionally a separate single-service bounds analysis; Plan
   optimizer is the screen that resolves multiple services together.

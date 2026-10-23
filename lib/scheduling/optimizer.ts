@@ -30,6 +30,8 @@ import { candidateToAppointment, generateCandidates } from "./candidates";
 
 export type OptimizerStatus = "TARGETS_MET" | "FEASIBLE" | "INFEASIBLE" | "BOUNDED";
 export type PlanStrategy = "BALANCED" | "CONTINUITY" | "FEWEST_VISITS" | "PREFERRED" | "EARLIEST";
+export type OptimizerEngine = "TYPESCRIPT_BOUNDED" | "PYTHON_CP_SAT";
+export type SolverStatus = "OPTIMAL" | "FEASIBLE" | "INFEASIBLE" | "UNKNOWN";
 
 export interface ServiceGoal {
   service_id: UUID;
@@ -114,6 +116,10 @@ export interface PatientWeekOptimization {
   plans: OptimizedPlan[];
   explanations: OptimizationExplanation[];
   meta: {
+    engine: OptimizerEngine;
+    solver_status: SolverStatus | null;
+    optimality_proven: boolean;
+    fallback_reason: string | null;
     generated_candidates: number;
     searched_candidates: number;
     rejected_candidates: number;
@@ -241,6 +247,10 @@ function optimizeAdditions(
       plans: [],
       explanations: explainNoCandidates(goals),
       meta: {
+        engine: "TYPESCRIPT_BOUNDED",
+        solver_status: null,
+        optimality_proven: false,
+        fallback_reason: null,
         generated_candidates: 0,
         searched_candidates: 0,
         rejected_candidates: 0,
@@ -263,12 +273,12 @@ function optimizeAdditions(
     travel: request.travel,
   });
 
-  const reduced = reduceCandidates(
+  const reduced = reduceOptimizerCandidates(
     generation.candidates,
     request.max_search_candidates ?? DEFAULT_MAX_SEARCH_CANDIDATES,
   );
   const goalIndex = new Map(goals.map((goal, index) => [goal.service_id, index]));
-  const authorizationLimits = authorizationBudgets(ctx, request.patient_id);
+  const authorizationLimits = optimizerAuthorizationBudgets(ctx, request.patient_id);
   const candidates = reduced.candidates
     .filter((candidate) => {
       const index = goalIndex.get(candidate.service_id);
@@ -339,10 +349,10 @@ function optimizeAdditions(
     if (plans.length >= (request.max_solutions ?? 4)) break;
   }
 
-  plans.sort(comparePlans);
+  plans.sort(compareOptimizedPlans);
   const best = plans.find((plan) => plan.approvable);
   const targetsMet = best ? best.service_metrics.every((metric) => metric.target_met) : false;
-  const explanations = explainShortfalls(goals, best, generation.rejectionsByCode);
+  const explanations = explainOptimizerShortfalls(goals, best, generation.rejectionsByCode);
   const bounded = generation.truncated || reduced.reduced || timeLimitReached;
 
   return {
@@ -353,6 +363,10 @@ function optimizeAdditions(
     plans,
     explanations,
     meta: {
+      engine: "TYPESCRIPT_BOUNDED",
+      solver_status: null,
+      optimality_proven: false,
+      fallback_reason: null,
       generated_candidates: generation.candidates.length,
       searched_candidates: candidates.length,
       rejected_candidates: generation.rejected,
@@ -504,7 +518,7 @@ function exploreMoveRescues(
   }
 
   const plans = deduplicatePlans([...additionsOnly.plans, ...movePlans])
-    .sort(comparePlans)
+    .sort(compareOptimizedPlans)
     .slice(0, request.max_solutions ?? 4);
   const best = plans.find((plan) => plan.approvable);
   const targetsMet = Boolean(best?.service_metrics.every((metric) => metric.target_met));
@@ -524,8 +538,12 @@ function exploreMoveRescues(
           ? "FEASIBLE"
           : "INFEASIBLE",
     plans,
-    explanations: explainShortfalls(additionsOnly.goals, best, {}),
+    explanations: explainOptimizerShortfalls(additionsOnly.goals, best, {}),
     meta: {
+      engine: additionsOnly.meta.engine,
+      solver_status: additionsOnly.meta.solver_status,
+      optimality_proven: additionsOnly.meta.optimality_proven,
+      fallback_reason: additionsOnly.meta.fallback_reason,
       generated_candidates: generatedCandidates,
       searched_candidates: searchedCandidates,
       rejected_candidates: rejectedCandidates,
@@ -713,7 +731,7 @@ function buildGoals(ctx: ScheduleContext, request: OptimizePatientWeekRequest): 
     );
 }
 
-function reduceCandidates(
+export function reduceOptimizerCandidates(
   candidates: CandidateAppointment[],
   maximum: number,
 ): { candidates: CandidateAppointment[]; reduced: boolean } {
@@ -962,6 +980,54 @@ function reprovePlan(
   return legal;
 }
 
+/**
+ * Turn an external solver's opaque candidate selection back into the exact
+ * plan shape used by approval. Every candidate is re-evaluated against the
+ * rule engine before the plan becomes approvable.
+ */
+export function buildOptimizedPlanFromCandidates(
+  ctx: ScheduleContext,
+  goals: ServiceGoal[],
+  appointments: CandidateAppointment[],
+  strategy: PlanStrategy,
+  label: string,
+  rationale: string,
+  travel?: TravelModel,
+  idPrefix = "plan_",
+): OptimizedPlan | null {
+  const legal = reprovePlan(ctx, appointments, travel);
+  if (!legal || legal.length === 0) return null;
+  const serviceMetrics = metricsFor(goals, legal);
+  const requiredMet = serviceMetrics
+    .filter((metric) => metric.required)
+    .every((metric) => metric.minimum_met);
+  const incumbentProviders = new Set(
+    (ctx.appointmentsByPatient.get(legal[0].patient_id) ?? [])
+      .filter((appointment) => appointment.provider_id)
+      .map((appointment) => appointment.provider_id as UUID),
+  );
+  const providers = new Set(legal.map((candidate) => candidate.provider_id));
+  return {
+    id: `${idPrefix}${stableHash(planFingerprint(ctx, goals, legal, serviceMetrics))}`,
+    strategy,
+    label,
+    rationale,
+    appointments: legal,
+    moves: [],
+    service_metrics: serviceMetrics,
+    added_hours: round(
+      legal.reduce((total, candidate) => total + slotsToHours(candidate.duration_slots), 0),
+    ),
+    targets_met: serviceMetrics.filter((metric) => metric.target_met).length,
+    required_services_met: requiredMet,
+    provider_changes: [...providers].filter((provider) => !incumbentProviders.has(provider)).length,
+    preferred_appointments: legal.filter(
+      (candidate) => (candidate.objective_values.preferred_provider ?? 0) > 0,
+    ).length,
+    approvable: requiredMet,
+  };
+}
+
 function metricsFor(goals: ServiceGoal[], appointments: CandidateAppointment[]): PlanServiceMetric[] {
   return goals.map((goal) => {
     const matching = appointments.filter((candidate) => candidate.service_id === goal.service_id);
@@ -992,7 +1058,7 @@ function metricsFor(goals: ServiceGoal[], appointments: CandidateAppointment[]):
   });
 }
 
-function explainShortfalls(
+export function explainOptimizerShortfalls(
   goals: ServiceGoal[],
   plan: OptimizedPlan | undefined,
   rejectionCounts: Record<string, number | undefined>,
@@ -1042,7 +1108,7 @@ function sessionLimit(goal: ServiceGoal): number {
   return goal.addable_sessions;
 }
 
-function authorizationBudgets(
+export function optimizerAuthorizationBudgets(
   ctx: ScheduleContext,
   patientId: UUID,
 ): Map<UUID, number> {
@@ -1072,7 +1138,7 @@ function authorizationHours(authorization: {
   return null;
 }
 
-function comparePlans(a: OptimizedPlan, b: OptimizedPlan): number {
+export function compareOptimizedPlans(a: OptimizedPlan, b: OptimizedPlan): number {
   return (
     Number(b.required_services_met) - Number(a.required_services_met) ||
     b.targets_met - a.targets_met ||

@@ -9,13 +9,28 @@ import { loadHorizon } from "@/lib/data/snapshot";
 import { addDays, parseZonedDateTimeLocal } from "@/lib/domain/time";
 import { FlatTravelModel } from "@/lib/rules/travel";
 import { createClient } from "@/lib/supabase/server";
-import { optimizePatientWeek } from "./optimizer";
+import { recordOperationalEvent } from "@/lib/observability/events";
+import { logEvent } from "@/lib/observability/logger";
+import { optimizePatientWeekWithSolver } from "./cpSat";
+import type { PatientWeekOptimization } from "./optimizer";
 
 const value = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
 
 function resultPath(patientId: string, week: string, key: "error" | "notice", message: string) {
   const query = new URLSearchParams({ patient: patientId, week, [key]: message });
   return `/approvals?${query.toString()}`;
+}
+
+async function recordOptimizerBoundary(
+  optimization: PatientWeekOptimization,
+) {
+  if (optimization.status !== "BOUNDED") return;
+  logEvent("warn", "optimizer.safety_limit_reached", {
+    optimizer_status: optimization.status,
+    plan_count: optimization.plans.length,
+    runtime_ms: optimization.meta.runtime_ms,
+  });
+  await recordOperationalEvent("OPTIMIZER_BOUNDED");
 }
 
 /**
@@ -70,13 +85,14 @@ export async function approveOptimizationPlan(form: FormData) {
     timeZone: patient.timezone ?? undefined,
     includeOpaqueBusy: true,
   });
-  const optimization = optimizePatientWeek(ctx, {
+  const optimization = await optimizePatientWeekWithSolver(ctx, {
     patient_id: patientId,
     max_solutions: 5,
     start_step_slots: 1,
     move_not_before: new Date(),
     travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
   });
+  await recordOptimizerBoundary(optimization);
   const plan = optimization.plans.find((candidate) => candidate.id === planId);
   if (!plan) {
     redirect(
@@ -251,13 +267,14 @@ export async function recordOptimizationPlanDecision(form: FormData) {
     timeZone,
     includeOpaqueBusy: true,
   });
-  const optimization = optimizePatientWeek(ctx, {
+  const optimization = await optimizePatientWeekWithSolver(ctx, {
     patient_id: patientId,
     max_solutions: 5,
     start_step_slots: 1,
     move_not_before: new Date(),
     travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
   });
+  await recordOptimizerBoundary(optimization);
   const plan = optimization.plans.find((candidate) => candidate.id === planId);
   if (!plan) {
     redirect(

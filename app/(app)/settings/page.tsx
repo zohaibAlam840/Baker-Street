@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/data/snapshot";
 import { SCHEDULING_TIMEZONE } from "@/lib/scheduling/defaults";
 import { PushNotifications } from "@/components/settings/PushNotifications";
+import { InstallApp } from "@/components/settings/InstallApp";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,8 @@ export default async function SettingsPage() {
       </div>
 
       <PushNotifications />
+
+      <InstallApp />
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
@@ -94,9 +97,13 @@ export default async function SettingsPage() {
             "Audited administrator access decisions with deactivation and last-admin safeguards",
             "Atomic administrator configuration with future-booking safeguards and audit history",
             "Consent-aware Twilio SMS and SendGrid email delivery with signed receipt reconciliation",
+            "Read-only guardian portal with verified email access and immediate audited revocation",
+            "FHIR patient and Claim draft exports with gated vendor-neutral integration adapters",
+            "Optional authenticated CP-SAT optimization and tokenized model interpretation with deterministic fallbacks",
             "Infeasibility explanations ordered by what is actually binding",
             "Hiring and what-if simulation against an in-memory copy",
             "Supabase Auth and database-enforced access for seven scoped roles",
+            "Installable PWA with PHI-safe offline behavior and production app-link association endpoints",
           ].map((item) => (
             <li key={item} className="flex gap-2.5">
               <span
@@ -119,12 +126,12 @@ export default async function SettingsPage() {
         />
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {[
-            "No CP-SAT/global-optimum proof when bounded search cannot reach every target",
+            "Global proof covers only a complete generated addition model; truncated searches, fallback, and move rescue remain explicitly bounded",
             "No optimizer cancellation, telehealth moves, or multi-move chains; planned reductions use a separate clinical review queue",
-            "No native iOS or Android package; the mobile experience is an installable PWA",
-            "No billing claim submission or electronic health-record integration",
-            "No language model — the assistant is a fixed-phrase parser",
-            "No billing or revenue data of any kind",
+            "Store-signed iOS and Android binaries require client-owned bundle IDs, developer accounts, signing identities, and store approval",
+            "FHIR R4 EHR and Claim drafts are available; live record writes and claim submission await approved vendor mappings and credentials",
+            "The assistant uses deterministic parsing by default; optional tokenized model interpretation requires explicit PHI approval",
+            "No payer adjudication, remittance, denial management, payment posting, or revenue ledger",
           ].map((item) => (
             <li key={item} className="flex gap-2.5">
               <span

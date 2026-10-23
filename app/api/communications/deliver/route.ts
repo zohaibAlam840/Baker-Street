@@ -1,26 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
-
 import { DeliveryConfigurationError } from "@/lib/communications/delivery/config";
 import { runCommunicationDelivery } from "@/lib/communications/delivery/worker";
 import { logEvent } from "@/lib/observability/logger";
+import { isAuthorizedCronRequest } from "@/lib/operations/cron";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-function authorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  const supplied = request.headers.get("authorization");
-  if (!secret || secret.length < 16 || !supplied?.startsWith("Bearer ")) return false;
-  const expectedBuffer = Buffer.from(`Bearer ${secret}`);
-  const suppliedBuffer = Buffer.from(supplied);
-  return (
-    expectedBuffer.length === suppliedBuffer.length &&
-    timingSafeEqual(expectedBuffer, suppliedBuffer)
-  );
-}
-
 async function handle(request: Request) {
-  if (!authorized(request)) {
+  if (!isAuthorizedCronRequest(request)) {
     return Response.json(
       { ok: false, error: "Unauthorized." },
       { status: 401, headers: { "cache-control": "no-store" } },
@@ -49,4 +36,3 @@ async function handle(request: Request) {
 
 export const GET = handle;
 export const POST = handle;
-

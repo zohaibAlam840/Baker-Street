@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authorizeApi, isApiError } from "@/lib/auth/api";
 
 import { answerQuestion } from "@/lib/ai/answer";
-import { interpret } from "@/lib/ai/interpret";
+import { interpretWithOptionalLlm } from "@/lib/ai/llmInterpret";
 import { can } from "@/lib/auth/roles";
 import { getSession } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
@@ -60,7 +60,8 @@ export async function POST(request: NextRequest) {
     startDate: week,
     includeOpaqueBusy: true,
   });
-  const understood = interpret(question, ctx);
+  const interpretation = await interpretWithOptionalLlm(question, ctx);
+  const understood = interpretation.request;
   const answer = answerQuestion(ctx, understood);
 
   return NextResponse.json({
@@ -76,6 +77,11 @@ export async function POST(request: NextRequest) {
       confidence: understood.confidence,
     },
     answer,
-    meta: { week, synthetic_data: synthetic },
+    meta: {
+      week,
+      synthetic_data: synthetic,
+      parser: interpretation.parser,
+      llm_fallback: interpretation.fallbackReason,
+    },
   });
 }

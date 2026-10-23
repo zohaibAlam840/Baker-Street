@@ -169,6 +169,39 @@ export async function setContactChannelConsent(form: FormData) {
   done(path, `${channel === "SMS" ? "SMS" : "Email"} consent updated.`);
 }
 
+export async function manageGuardianPortalAccess(form: FormData) {
+  const patientId = field(form, "patient_id");
+  const path = UUID.test(patientId) ? `/patients/${patientId}` : "/patients";
+  const { supabase } = await authorized("communications.manage", path);
+  requireUuid(patientId, "Patient", path);
+  const contactId = requireUuid(field(form, "contact_id"), "Contact", path);
+  const decision = field(form, "decision");
+  if (decision !== "ENABLE" && decision !== "REVOKE") fail(path, "Choose a valid portal access decision.");
+  const reason = field(form, "reason");
+  if (reason.length < 3 || reason.length > 500) fail(path, "Document a reason between 3 and 500 characters.");
+  requireConfirmation(form, path, "Confirm this guardian portal access decision.");
+  const { error } = await supabase.rpc("manage_guardian_portal_access", {
+    p_contact_id: contactId,
+    p_enable: decision === "ENABLE",
+    p_expected_version: version(form, path) ?? 0,
+    p_reason: reason,
+  });
+  if (error) {
+    const lower = error.message.toLowerCase();
+    const safe = lower.includes("active authorized legal guardian")
+      ? "Portal access requires an active legal guardian with an approved email and information-release authority."
+      : safeRpcMessage(error.message, "Guardian portal access could not be updated.");
+    fail(path, safe);
+  }
+  revalidatePath(path);
+  done(
+    path,
+    decision === "ENABLE"
+      ? "Guardian portal access approved. The guardian can now request a secure email link."
+      : "Guardian portal access revoked immediately.",
+  );
+}
+
 function scheduledFor(form: FormData, path: string, timeZone: string) {
   const raw = field(form, "scheduled_for");
   const date = parseZonedDateTimeLocal(raw, timeZone);

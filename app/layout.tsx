@@ -17,6 +17,13 @@ export const metadata: Metadata = {
   title: "Baker Street Scheduling",
   description: "Multi-service clinical scheduling and optimization",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/icons/app-icon.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+  },
   appleWebApp: { capable: true, title: "Baker Street", statusBarStyle: "default" },
 };
 

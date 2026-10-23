@@ -4,6 +4,8 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
+import { REQUIRED_SCHEMA_VERSION } from "../lib/deployment/verification";
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -28,19 +30,22 @@ async function main() {
   const { data: schema, error: schemaError } = await anonymous.rpc("app_schema_status");
   if (
     schemaError
-    || schema?.version !== "20261022040000"
+    || schema?.version !== REQUIRED_SCHEMA_VERSION
     || schema?.optimizer_moves !== true
     || schema?.optimizer_decisions !== true
     || schema?.clinical_reductions !== true
     || schema?.provider_time_off !== true
     || schema?.provider_callout_guard !== true
     || schema?.access_management !== true
+    || schema?.operational_monitoring !== true
+    || schema?.push_delivery !== true
     || schema?.schedule_recovery !== true
     || schema?.communications !== true
     || schema?.communication_delivery !== true
     || schema?.configuration_writes !== true
+    || schema?.guardian_portal !== true
   ) {
-    throw new Error("The linked database does not report recovery, communications delivery, configuration writes, optimizer decisions and moves, clinical reduction review, provider time off, the self-reported callout guard, and guarded access management as ready.");
+    throw new Error("The linked database does not report recovery, communications delivery, push delivery, operational monitoring, configuration writes, optimizer decisions and moves, clinical reduction review, provider time off, the self-reported callout guard, guardian portal, and guarded access management as ready.");
   }
 
   for (const [expectedRole, email] of accounts) {

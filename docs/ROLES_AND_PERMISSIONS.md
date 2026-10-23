@@ -118,13 +118,15 @@ able to alter it.
 
 *Estimated headcount: 1, likely part-time or an existing staff member.*
 
-### Not proposed, worth asking about: parent / guardian portal
+### Parent / guardian portal
 
-The spec never mentions patients or families logging in. A parent portal
-(view my child's schedule, request a change) is a common next ask and would
-change the security model substantially — it is the difference between an
-internal tool and a public-facing one. **Out of scope unless the client says
-otherwise.**
+The application includes a separate read-only guardian boundary. A scheduler
+must verify legal authority, approved email, and information-release permission
+before granting access. Guardians receive one-time email links and can see only
+scheduled/confirmed appointments for the next 90 days. They are not staff
+roles, cannot request or change care in the portal, and never receive direct
+table access. Production activation still requires the client to approve its
+identity-verification and support policy.
 
 ---
 
@@ -274,7 +276,8 @@ Grouped by how much they change the build.
 4. Is there an existing EHR this must sit next to, or inside? §75 shows
    "WEB / EHR UI", which implies integration — that could mean single sign-on
    and would change the whole authentication approach.
-5. Do parents or guardians ever log in? Out of scope as proposed.
+5. Which verified guardians may use the read-only portal, and who owns identity
+   disputes, revocation requests, and support escalation?
 6. Real patient and staff numbers, to confirm or replace the estimate above.
 
 **Needed before production PHI:**

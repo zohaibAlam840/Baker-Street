@@ -15,11 +15,9 @@
  * wording around it is presentation.
  *
  * ── Honest note on the implementation ──────────────────────────────────────
- * There is no language model wired up. This is a deterministic parser over a
- * small set of phrasings, which is enough to demonstrate the *architecture*:
- * request in, structured intent out, engine decides. Swapping in a real model
- * means replacing `interpret()` and nothing else — the boundary is the point,
- * not the parser.
+ * This deterministic parser remains the primary and fallback interpreter. An
+ * optional, separately gated model may translate low-confidence phrasing, but
+ * it must return the same typed structure and can never bypass the engine.
  */
 
 import type { ScheduleContext } from "../rules/context";

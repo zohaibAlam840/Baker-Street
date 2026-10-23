@@ -38,7 +38,8 @@ includes:
 
 Apply `supabase/migrations/20261021010000_configuration_writes.sql` before
 deploying the matching application build. The health endpoint requires schema
-version `20261022040000` and reports `configuration_writes: true` only when the
+version `20261024010000` and reports `configuration_writes: true` only when the
 commands are installed. That later schema version also includes optimizer plan
 decisions, provider communications delivery, and atomic one-visit optimizer
-moves, clinical reduction review, and planned provider time off.
+moves, clinical reduction review, planned provider time off, operational push
+delivery, and guardian portal access.

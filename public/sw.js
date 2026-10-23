@@ -1,7 +1,7 @@
-const CACHE="baker-street-shell-v1";
-const SHELL=["/offline","/favicon.ico"];
+const CACHE="baker-street-shell-v2";
+const SHELL=["/offline","/favicon.ico","/icons/app-icon-192.png","/icons/app-icon-512.png"];
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)));self.skipWaiting()});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))));self.clients.claim()});
 self.addEventListener("fetch",event=>{const request=event.request;if(request.method!=="GET"||request.mode!=="navigate")return;event.respondWith(fetch(request).catch(()=>caches.match("/offline")))});
-self.addEventListener("push",event=>{let data={};try{data=event.data?.json()??{}}catch{}const title=data.title??"Baker Street";event.waitUntil(self.registration.showNotification(title,{body:data.body??"You have a new work-queue alert.",icon:"/favicon.ico",badge:"/favicon.ico",data:{href:data.href??"/notifications"},tag:data.tag??"baker-street-alert"}))});
+self.addEventListener("push",event=>{let data={};try{data=event.data?.json()??{}}catch{}const title=data.title??"Baker Street";event.waitUntil(self.registration.showNotification(title,{body:data.body??"You have a new work-queue alert.",icon:"/icons/app-icon-192.png",badge:"/icons/app-icon-192.png",data:{href:data.href??"/notifications"},tag:data.tag??"baker-street-alert"}))});
 self.addEventListener("notificationclick",event=>{event.notification.close();const href=event.notification.data?.href??"/notifications";event.waitUntil(self.clients.matchAll({type:"window",includeUncontrolled:true}).then(clients=>{const existing=clients.find(client=>new URL(client.url).origin===self.location.origin);if(existing){existing.navigate(href);return existing.focus()}return self.clients.openWindow(href)}))});

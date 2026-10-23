@@ -1,0 +1,81 @@
+name: Monitor production
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: Optional URL override; defaults to the PRODUCTION_URL repository variable
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-production
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEPLOYMENT_URL: ${{ inputs.deployment_url || vars.PRODUCTION_URL }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate monitor configuration
+        shell: bash
+        run: |
+          if [[ -z "$DEPLOYMENT_URL" ]]; then
+            echo "Set the PRODUCTION_URL repository variable." >&2
+            exit 1
+          fi
+      - run: npm ci --ignore-scripts
+      - name: Verify production with retries
+        shell: bash
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            echo "Production verification attempt $attempt of 3"
+            if npm run verify:deployment 2>&1 | tee "verification-attempt-$attempt.log"; then
+              echo "### Production monitor passed" >> "$GITHUB_STEP_SUMMARY"
+              echo "Health, schema, security headers, and anonymous access controls passed." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then sleep 10; fi
+          done
+          echo "### Production monitor failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "All three verification attempts failed. Follow the production incident runbook." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+      - name: Evaluate operational alerts
+        shell: bash
+        run: |
+          set -o pipefail
+          if [[ ${#CRON_SECRET} -lt 16 ]]; then
+            echo "Configure the CRON_SECRET repository secret." >&2
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error \
+            --max-time 30 \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "${DEPLOYMENT_URL%/}/api/operations/alerts" \
+            | tee operational-alerts.log
+          echo "Operational alert thresholds were evaluated." >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain failed verification evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-verification-${{ github.run_id }}
+          path: |
+            verification-attempt-*.log
+            operational-alerts.log
+          if-no-files-found: ignore
+          retention-days: 14

@@ -13,8 +13,9 @@ import {
   type OptimizationPlanDecision,
 } from "@/lib/scheduling/decisions";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
-import { optimizePatientWeek } from "@/lib/scheduling/optimizer";
+import { optimizePatientWeekWithSolver } from "@/lib/scheduling/cpSat";
 import { createClient } from "@/lib/supabase/server";
+import { logEvent } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export default async function ApprovalsPage({
   }
   const weekLabel = `${ctx.grid.startDate} to ${addDays(ctx.grid.startDate, 6)}`;
   const optimization = patientId
-    ? optimizePatientWeek(ctx, {
+    ? await optimizePatientWeekWithSolver(ctx, {
         patient_id: patientId,
         max_solutions: 5,
         start_step_slots: 1,
@@ -62,6 +63,13 @@ export default async function ApprovalsPage({
         travel: new FlatTravelModel(ctx.locations, { enforceAsHardConstraint: true }),
       })
     : null;
+  if (optimization?.status === "BOUNDED") {
+    logEvent("warn", "optimizer.safety_limit_reached", {
+      optimizer_status: optimization.status,
+      plan_count: optimization.plans.length,
+      runtime_ms: optimization.meta.runtime_ms,
+    });
+  }
   const view = params.view === "decided" ? "decided" : "active";
   const supabase = await createClient();
   const decisionResult = patientId
@@ -404,6 +412,9 @@ export default async function ApprovalsPage({
 
           <p className="text-xs leading-relaxed text-[var(--ink-muted)]">
             {optimization.meta.searched_candidates.toLocaleString()} legal candidates searched in {optimization.meta.runtime_ms}ms.
+            {optimization.meta.engine === "PYTHON_CP_SAT" && " CP-SAT evaluated the addition model."}
+            {optimization.meta.optimality_proven && " Optimality was proven over the generated addition candidates."}
+            {optimization.meta.fallback_reason && " The bounded local optimizer was used because the solver service was unavailable."}
             {optimization.meta.move_destinations_considered > 0 && ` ${optimization.meta.move_destinations_considered} bounded move destinations were compared.`}
             {optimization.status === "BOUNDED" && " The safety limit was reached, so this is the best plan found—not a claim that no better plan exists."}
             {" "}Approval reloads live data, recomputes the selected option, and commits its move and additions in one database transaction.

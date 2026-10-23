@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Baker Street Scheduling">
+  <rect width="512" height="512" rx="112" fill="#047857"/>
+  <rect x="102" y="124" width="308" height="274" rx="54" fill="#f7f9fa"/>
+  <path d="M102 202h308" stroke="#9fd8c4" stroke-width="28"/>
+  <path d="M174 94v72M338 94v72" stroke="#f7f9fa" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="256" cy="294" r="73" fill="#047857"/>
+  <path d="M256 251v48l37 23" fill="none" stroke="#f7f9fa" stroke-width="21" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+

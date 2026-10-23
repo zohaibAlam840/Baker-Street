@@ -387,6 +387,14 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: "shield",
   },
   {
+    href: "/claims",
+    label: "Claim readiness",
+    short: "Claims",
+    requires: ["authorization.manage"],
+    description: "FHIR claim drafts and mapping gaps",
+    icon: "clipboard",
+  },
+  {
     href: "/clinical",
     label: "Clinical",
     short: "Clinical",

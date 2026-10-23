@@ -4,7 +4,9 @@ import { AnswerView } from "@/components/assistant/AnswerView";
 import { Card, CardHeader } from "@/components/charts";
 import { requirePermission } from "@/lib/auth/session";
 import { answerQuestion } from "@/lib/ai/answer";
-import { EXAMPLE_REQUESTS, interpret } from "@/lib/ai/interpret";
+import { EXAMPLE_REQUESTS } from "@/lib/ai/interpret";
+import { interpretWithOptionalLlm } from "@/lib/ai/llmInterpret";
+import { readLlmAssistantConfig } from "@/lib/ai/llmConfig";
 import { loadHorizon } from "@/lib/data/snapshot";
 import { defaultWeekStart } from "@/lib/scheduling/defaults";
 
@@ -29,8 +31,11 @@ export default async function AssistantPage({
 
   const { ctx } = await loadHorizon({ startDate: week ?? defaultWeekStart() });
 
-  const request = q ? interpret(q, ctx) : null;
+  const interpretation = q ? await interpretWithOptionalLlm(q, ctx) : null;
+  const request = interpretation?.request ?? null;
   const answer = request ? answerQuestion(ctx, request) : null;
+  let llmEnabled = false;
+  try { llmEnabled = readLlmAssistantConfig() !== null; } catch { /* deployment validation reports this */ }
 
   return (
     <div className="space-y-4">
@@ -124,10 +129,9 @@ export default async function AssistantPage({
       </Card>
 
       <p className="text-xs leading-relaxed text-[var(--ink-muted)]">
-        No language model is connected. This is a deterministic parser over a
-        fixed set of phrasings, present to demonstrate the architecture the
-        specification requires: language in, structured request out, engine
-        decides. Replacing the parser with a model changes one file.
+        {llmEnabled
+          ? `The deterministic parser runs first. Approved low-confidence questions may use the configured language model after known names, services, contact details, and identifiers are replaced with allowlisted tokens. ${interpretation?.parser === "LLM" ? "This answer used that structured interpretation." : "This answer used the deterministic interpretation."}`
+          : "No language model is enabled. The deterministic parser handles a fixed set of phrasings. In every mode, language only becomes a structured request; the scheduling engine decides the answer."}
       </p>
     </div>
   );

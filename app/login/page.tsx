@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { IconLogo } from "@/components/shell/icons";
-import { signIn } from "@/lib/auth/actions";
+import { signIn, signInWithEnterpriseSso } from "@/lib/auth/actions";
+import { readEnterpriseSsoConfig } from "@/lib/auth/sso";
 
 export const dynamic = "force-dynamic";
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
   const { error, notice } = await searchParams;
+  let sso = null;
+  try { sso = readEnterpriseSsoConfig(); } catch { /* Deployment validation reports the configuration error. */ }
   return <AuthShell title="Welcome back" subtitle="Sign in to Baker Street Scheduling.">
     {error && <Alert tone="error">{error}</Alert>}{notice && <Alert>{notice}</Alert>}
     <form action={signIn} className="mt-6 space-y-4">
@@ -19,6 +22,18 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         Sign in
       </AuthSubmitButton>
     </form>
+    {sso && <>
+      <div className="my-5 flex items-center gap-3 text-xs text-[var(--ink-muted)]"><span className="h-px flex-1 bg-[var(--rule-hairline)]"/><span>or</span><span className="h-px flex-1 bg-[var(--rule-hairline)]"/></div>
+      <form action={signInWithEnterpriseSso}>
+        <AuthSubmitButton
+          className="h-11 w-full rounded-full border border-[var(--border-ring)] bg-[var(--surface-1)] text-sm font-medium text-[var(--ink-primary)]"
+          pendingLabel="Opening secure sign-in…"
+          pendingDescription="Redirecting to your organization’s identity provider."
+        >
+          Continue with {sso.label}
+        </AuthSubmitButton>
+      </form>
+    </>}
     <p className="mt-5 text-center text-sm text-[var(--ink-secondary)]">Need an account? <Link href="/signup" className="font-medium text-[var(--brand)] underline underline-offset-4">Request access</Link></p>
   </AuthShell>;
 }

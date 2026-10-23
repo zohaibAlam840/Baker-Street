@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
+/recovery-manifest*.json
 
 # next.js
 /.next/

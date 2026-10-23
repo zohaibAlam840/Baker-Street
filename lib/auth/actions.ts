@@ -4,8 +4,11 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { recordOperationalEvent } from "@/lib/observability/events";
+import { logEvent } from "@/lib/observability/logger";
 import { requirePermission } from "./session";
 import { ROLE_DEFINITIONS, isRole } from "./roles";
+import { readEnterpriseSsoConfig } from "./sso";
 
 const message = (path: string, key: string, value: string) => `${path}?${key}=${encodeURIComponent(value)}`;
 
@@ -13,12 +16,61 @@ export async function signIn(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) redirect(message("/login", "error", "Email or password is incorrect."));
-  const { data: profile } = await supabase.from("user_profiles").select("role, active").single();
+  const { data: auth, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !auth.user) {
+    logEvent("warn", "auth.sign_in_failed", {
+      error_code: error?.code ?? "INVALID_CREDENTIALS",
+    });
+    await recordOperationalEvent("AUTH_SIGN_IN_FAILED");
+    redirect(message("/login", "error", "Email or password is incorrect."));
+  }
+  const { data: profile } = await supabase
+    .from("user_profiles")
+    .select("role, active")
+    .eq("user_id", auth.user.id)
+    .single();
   if (!profile?.active) redirect("/account/pending");
   if (!isRole(profile.role)) redirect(message("/login", "error", "Your account has no valid role."));
   redirect(ROLE_DEFINITIONS[profile.role].home);
+}
+
+export async function signInWithEnterpriseSso() {
+  let config;
+  try {
+    config = readEnterpriseSsoConfig();
+  } catch {
+    redirect(message("/login", "error", "Enterprise sign-in is not configured correctly."));
+  }
+  if (!config) redirect(message("/login", "error", "Enterprise sign-in is not enabled."));
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (!siteUrl) redirect(message("/login", "error", "Enterprise sign-in is not configured correctly."));
+
+  const supabase = await createClient();
+  const selector = config.providerId
+    ? { providerId: config.providerId }
+    : { domain: config.domain! };
+  const { data, error } = await supabase.auth.signInWithSSO({
+    ...selector,
+    options: {
+      redirectTo: `${siteUrl.replace(/\/$/, "")}/auth/callback?next=/dashboard`,
+      skipBrowserRedirect: true,
+    },
+  });
+  if (error || !data?.url) {
+    logEvent("warn", "auth.sso_start_failed", { error_code: error?.code ?? "SSO_START_FAILED" });
+    await recordOperationalEvent("AUTH_SIGN_IN_FAILED");
+    redirect(message("/login", "error", "Enterprise sign-in could not be started."));
+  }
+  let destination: URL;
+  try {
+    destination = new URL(data.url);
+  } catch {
+    redirect(message("/login", "error", "Enterprise sign-in returned an invalid destination."));
+  }
+  if (destination.protocol !== "https:" && destination.hostname !== "127.0.0.1" && destination.hostname !== "localhost") {
+    redirect(message("/login", "error", "Enterprise sign-in returned an unsafe destination."));
+  }
+  redirect(destination.toString());
 }
 
 export async function signUp(formData: FormData) {

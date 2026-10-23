@@ -2,7 +2,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local role postgres;
 set local search_path = public, extensions;
-select plan(239);
+select plan(263);
 
 select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnamespace = 'public'::regnamespace and relname = any(array[
   'patients','providers','appointments','authorizations','patient_service_requirements','patient_care_team','audit_log'
@@ -51,6 +51,23 @@ select extensions.ok(to_regprocedure('manage_user_access(uuid,int,app_role,uuid,
 select extensions.ok(has_function_privilege('authenticated','manage_user_access(uuid,int,app_role,uuid,boolean,text,text)','EXECUTE'), 'authenticated administrators can invoke the guarded access command');
 select extensions.ok(not has_table_privilege('authenticated','user_profiles','INSERT,UPDATE,DELETE'), 'user access changes cannot bypass the guarded command');
 select extensions.ok(not has_table_privilege('authenticated','user_access_commands','SELECT,INSERT,UPDATE,DELETE'), 'user access replay ledger is private');
+select extensions.ok((select relrowsecurity from pg_class where oid='operational_events'::regclass), 'operational event aggregates have RLS enabled');
+select extensions.ok(not has_table_privilege('authenticated','operational_events','SELECT,INSERT,UPDATE,DELETE') and has_table_privilege('service_role','operational_events','SELECT,INSERT,DELETE'), 'operational event aggregates are restricted to the service role');
+select extensions.ok((select relrowsecurity from pg_class where oid='push_notification_deliveries'::regclass), 'push delivery ledger has RLS enabled');
+select extensions.ok(not has_table_privilege('authenticated','push_notification_deliveries','SELECT,INSERT,UPDATE,DELETE'), 'authenticated clients cannot inspect or mutate push delivery state');
+select extensions.ok(has_table_privilege('service_role','push_notification_deliveries','SELECT,INSERT,UPDATE,DELETE'), 'push delivery ledger is available to the service worker');
+select extensions.ok(to_regprocedure('claim_push_notification_deliveries(integer,text)') is not null, 'bounded atomic push claim function is installed');
+select extensions.ok(to_regprocedure('record_push_notification_delivery(uuid,uuid,text,text)') is not null, 'push outcome function is installed');
+select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnamespace='public'::regnamespace and relname=any(array['guardian_portal_access','guardian_portal_access_events'])), 'guardian portal tables have RLS enabled');
+select extensions.ok(not has_table_privilege('authenticated','guardian_portal_access','INSERT,UPDATE,DELETE'), 'guardian access changes cannot bypass the guarded command');
+select extensions.ok(not has_table_privilege('authenticated','guardian_portal_access_events','INSERT,UPDATE,DELETE'), 'guardian access history is append-only through guarded functions');
+select extensions.ok(to_regprocedure('manage_guardian_portal_access(uuid,boolean,integer,text)') is not null, 'guardian portal management command is installed');
+select extensions.ok(to_regprocedure('claim_guardian_portal_access()') is not null, 'guardian verified-email claim command is installed');
+select extensions.ok(to_regprocedure('guardian_portal_snapshot()') is not null, 'minimal guardian snapshot function is installed');
+select extensions.ok(exists(select 1 from pg_trigger where tgname='patient_contact_guardian_portal_guard' and not tgisinternal), 'contact authority changes automatically revoke guardian access');
+select extensions.ok(not has_function_privilege('authenticated','claim_push_notification_deliveries(integer,text)','EXECUTE'), 'authenticated clients cannot claim push deliveries');
+select extensions.ok(not has_function_privilege('authenticated','record_push_notification_delivery(uuid,uuid,text,text)','EXECUTE'), 'authenticated clients cannot forge push outcomes');
+select extensions.ok((app_schema_status()->>'push_delivery')::boolean, 'deployment health reports automatic push delivery ready');
 select extensions.ok(to_regprocedure('optimization_busy_intervals(timestamptz,timestamptz)') is not null, 'PHI-free busy interval function is installed');
 select extensions.ok(to_regprocedure('app_schema_status()') is not null, 'deployment schema readiness function is installed');
 select extensions.ok(to_regprocedure('update_location_configuration(uuid,text,location_type,text,text,text,boolean)') is not null, 'atomic location configuration command is installed');
@@ -78,7 +95,7 @@ select extensions.ok(to_regprocedure('restore_cancelled_appointment(uuid,text,te
 select extensions.ok(to_regprocedure('withdraw_provider_callout(uuid,text,text)') is not null, 'provider callout withdrawal command is installed');
 select extensions.ok(to_regprocedure('release_locked_recovery_case(uuid,int,text)') is not null, 'locked recovery clinical release command is installed');
 select extensions.ok(to_regprocedure('provider_callout_intervals(timestamptz,timestamptz)') is not null, 'minimal callout interval reader is installed');
-select extensions.ok(app_schema_status()->>'version'='20261022040000' and (app_schema_status()->>'schedule_recovery')::boolean and (app_schema_status()->>'configuration_writes')::boolean and (app_schema_status()->>'optimizer_decisions')::boolean and (app_schema_status()->>'optimizer_moves')::boolean and (app_schema_status()->>'provider_time_off')::boolean and (app_schema_status()->>'provider_callout_guard')::boolean and (app_schema_status()->>'access_management')::boolean, 'deployment health reports recovery, time off, access management, configuration writes, and optimizer decisions and moves ready');
+select extensions.ok(app_schema_status()->>'version'='20261024010000' and (app_schema_status()->>'schedule_recovery')::boolean and (app_schema_status()->>'configuration_writes')::boolean and (app_schema_status()->>'optimizer_decisions')::boolean and (app_schema_status()->>'optimizer_moves')::boolean and (app_schema_status()->>'provider_time_off')::boolean and (app_schema_status()->>'provider_callout_guard')::boolean and (app_schema_status()->>'access_management')::boolean and (app_schema_status()->>'operational_monitoring')::boolean and (app_schema_status()->>'push_delivery')::boolean and (app_schema_status()->>'guardian_portal')::boolean, 'deployment health reports recovery, time off, access management, monitoring, push delivery, guardian portal, configuration writes, and optimizer decisions and moves ready');
 select extensions.ok(exists(select 1 from pg_trigger where tgname='validate_provider_callout_guard_trigger' and not tgisinternal), 'provider callouts guard appointment writes');
 select extensions.ok(not has_table_privilege('authenticated','appointments','INSERT'), 'authenticated clients cannot directly insert appointments');
 select extensions.ok(not has_table_privilege('authenticated','appointments','UPDATE'), 'authenticated clients cannot directly update appointments');
@@ -99,9 +116,9 @@ select extensions.ok((select bool_and(relrowsecurity) from pg_class where relnam
   'communication_delivery_config','communication_destination_hash_keys',
   'communication_destination_suppressions','communication_receipt_tokens'
 ])), 'all communication tables have RLS enabled');
-select extensions.ok(app_schema_status()->>'version'='20261022040000' and (app_schema_status()->>'communications')::boolean and (app_schema_status()->>'communication_delivery')::boolean, 'deployment health reports communications and provider delivery ready');
+select extensions.ok(app_schema_status()->>'version'='20261024010000' and (app_schema_status()->>'communications')::boolean and (app_schema_status()->>'communication_delivery')::boolean, 'deployment health reports communications and provider delivery ready');
 select extensions.ok((app_schema_status()->>'optimizer_moves')::boolean, 'deployment health reports move-enabled optimizer approval ready');
-select extensions.ok(app_schema_status()->>'version'='20261022040000' and (app_schema_status()->>'clinical_reductions')::boolean, 'deployment health reports clinical reduction review ready');
+select extensions.ok(app_schema_status()->>'version'='20261024010000' and (app_schema_status()->>'clinical_reductions')::boolean, 'deployment health reports clinical reduction review ready');
 select extensions.ok(to_regprocedure('save_patient_contact(uuid,uuid,text,text,text,text,text,boolean,boolean,boolean,text,text,text,time,time,boolean,int,text)') is not null, 'contact save command is installed');
 select extensions.ok(to_regprocedure('set_contact_channel_consent(uuid,communication_channel,boolean,text,int,text)') is not null, 'consent command is installed');
 select extensions.ok(to_regprocedure('queue_appointment_reminder(uuid,uuid,communication_channel,timestamptz,text)') is not null, 'appointment reminder command is installed');
@@ -150,7 +167,8 @@ from (values
   ('10000000-0000-0000-0000-000000000005'::uuid,'operations@test.invalid'),
   ('10000000-0000-0000-0000-000000000006'::uuid,'admin@test.invalid'),
   ('10000000-0000-0000-0000-000000000007'::uuid,'compliance@test.invalid'),
-  ('10000000-0000-0000-0000-000000000008'::uuid,'inactive@test.invalid')
+  ('10000000-0000-0000-0000-000000000008'::uuid,'inactive@test.invalid'),
+  ('10000000-0000-0000-0000-000000000009'::uuid,'assigned@example.invalid')
 ) x(id,email);
 
 insert into locations(id,name,type,timezone) values ('20000000-0000-0000-0000-000000000001','RLS Test Clinic','CLINIC','America/New_York');
@@ -887,6 +905,46 @@ select extensions.ok(exists(
   where action='USER_ACCESS_ACTIVATED'
     and new_values->>'target_user_id'='10000000-0000-0000-0000-000000000008'
 )=1, 'access activation records one permanent actor-scoped reason across retries');
+
+-- Guardian access is explicitly granted by a scheduler, claimed only by the
+-- verified matching email, scoped to a minimal snapshot, and auto-revoked when
+-- the underlying contact identity changes.
+set local role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000001',true);
+select extensions.is(
+  manage_guardian_portal_access(
+    (select id from patient_contacts where patient_id='40000000-0000-0000-0000-000000000001'),
+    true,0,'Legal authority and approved email verified'
+  )->>'status',
+  'PENDING',
+  'scheduler can create a pending guardian portal grant'
+);
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000009',true);
+select set_config('request.jwt.claims','{"sub":"10000000-0000-0000-0000-000000000009","email":"assigned@example.invalid","role":"authenticated"}',true);
+select extensions.is(claim_guardian_portal_access(),1,'verified matching guardian email claims the pending grant');
+select extensions.ok(
+  jsonb_array_length(guardian_portal_snapshot()->'patients')=1
+  and guardian_portal_snapshot()->'patients'->0->>'id'='40000000-0000-0000-0000-000000000001',
+  'guardian snapshot contains only the approved patient'
+);
+select extensions.is((select count(*) from guardian_portal_access)::bigint,1::bigint,'guardian reads only their own active access row');
+select set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000005',true);
+select set_config('request.jwt.claims','{"sub":"10000000-0000-0000-0000-000000000005","email":"operations@test.invalid","role":"authenticated"}',true);
+select extensions.throws_ok($sql$
+  select manage_guardian_portal_access(
+    (select id from patient_contacts where patient_id='40000000-0000-0000-0000-000000000001'),
+    false,2,'Unauthorized revocation attempt'
+  )
+$sql$,'P0001','Only schedulers may manage guardian portal access','non-scheduler cannot manage guardian portal access');
+reset role;
+set local role postgres;
+set local search_path = public, extensions;
+update patient_contacts set email='changed@example.invalid'
+where patient_id='40000000-0000-0000-0000-000000000001';
+select extensions.is((select status::text from guardian_portal_access),'REVOKED','contact email change immediately revokes guardian access');
+select extensions.ok(exists(
+  select 1 from guardian_portal_access_events where action='AUTO_REVOKED'
+), 'automatic guardian revocation is recorded in permanent history');
 
 select * from extensions.finish();
 rollback;

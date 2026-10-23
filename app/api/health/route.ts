@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
+import { validateDeploymentEnvironment } from "@/lib/deployment/environment";
+import { REQUIRED_SCHEMA_VERSION } from "@/lib/deployment/verification";
 import { logEvent } from "@/lib/observability/logger";
+import { readCpSatConfig } from "@/lib/scheduling/cpSatConfig";
 
 export const dynamic = "force-dynamic";
-
-const REQUIRED_SCHEMA_VERSION = "20261022040000";
 
 type ComponentStatus = "available" | "degraded" | "unavailable" | "unconfigured";
 
@@ -18,6 +19,9 @@ interface SchemaStatus {
   provider_time_off?: boolean;
   provider_callout_guard?: boolean;
   access_management?: boolean;
+  operational_monitoring?: boolean;
+  push_delivery?: boolean;
+  guardian_portal?: boolean;
   atomic_booking?: boolean;
   opaque_conflicts?: boolean;
   schedule_recovery?: boolean;
@@ -35,7 +39,38 @@ export async function GET() {
 
   let auth: ComponentStatus = !url || !key ? "unconfigured" : "unavailable";
   let database: ComponentStatus = !url || !key ? "unconfigured" : "unavailable";
+  let configuration: ComponentStatus = "available";
+  let solver: ComponentStatus = "unconfigured";
+  let solverRequired = false;
   let schema: SchemaStatus | null = null;
+
+  try {
+    const solverConfig = readCpSatConfig();
+    solverRequired = solverConfig?.required ?? false;
+    if (solverConfig) {
+      solver = "unavailable";
+      const response = await fetch(`${solverConfig.url}/health`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(4_000),
+      }).catch(() => null);
+      if (response) {
+        const payload = await response.json().catch(() => null) as { status?: unknown; contract?: unknown } | null;
+        solver = response.ok && payload?.status === "ok" && payload.contract === "1"
+          ? "available"
+          : "degraded";
+      }
+    }
+  } catch {
+    solver = "unavailable";
+    solverRequired = process.env.CP_SAT_REQUIRED?.trim().toLowerCase() === "true";
+  }
+
+  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
+    const target = process.env.VERCEL_ENV === "production" ? "production" : "staging";
+    configuration = validateDeploymentEnvironment(process.env, target).errors.length === 0
+      ? "available"
+      : "degraded";
+  }
 
   if (url && key) {
     const headers = {
@@ -73,6 +108,9 @@ export async function GET() {
         schema.provider_time_off === true &&
         schema.provider_callout_guard === true &&
         schema.access_management === true &&
+        schema.operational_monitoring === true &&
+        schema.push_delivery === true &&
+        schema.guardian_portal === true &&
         schema.atomic_booking === true &&
         schema.opaque_conflicts === true &&
         schema.schedule_recovery === true &&
@@ -83,11 +121,18 @@ export async function GET() {
     }
   }
 
-  const healthy = auth === "available" && database === "available";
+  const healthy =
+    auth === "available" &&
+    database === "available" &&
+    configuration === "available" &&
+    (!solverRequired || solver === "available");
   const body = {
     status: healthy ? "ok" : "degraded",
     auth,
     database,
+    configuration,
+    solver,
+    solver_required: solverRequired,
     schema_version: schema?.version ?? null,
     release:
       process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ??

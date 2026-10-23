@@ -7,7 +7,7 @@ import { Field, inputClass } from "@/components/forms/PrototypeForm";
 import { WeekGrid } from "@/components/schedule/WeekGrid";
 import { ServiceSummaryTable } from "@/components/schedule/tables";
 import { IconArrowUpRight, IconCalendar, IconSpark } from "@/components/shell/icons";
-import { savePatientContact, setContactChannelConsent } from "@/lib/communications/actions";
+import { manageGuardianPortalAccess, savePatientContact, setContactChannelConsent } from "@/lib/communications/actions";
 import { ROLE_DEFINITIONS, can } from "@/lib/auth/roles";
 import { requirePermission } from "@/lib/auth/session";
 import { loadHorizon } from "@/lib/data/snapshot";
@@ -53,6 +53,14 @@ interface ConsentRow {
   version: number;
 }
 
+interface GuardianPortalAccessRow {
+  patient_contact_id: string;
+  status: "PENDING" | "ACTIVE" | "REVOKED";
+  version: number;
+  claimed_at: string | null;
+  revoked_at: string | null;
+}
+
 /**
  * The patient record.
  *
@@ -92,6 +100,10 @@ export default async function PatientDetailPage({
     ? await supabase.from("communication_consents").select("patient_contact_id,channel,status,source,granted_at,revoked_at,version").in("patient_contact_id", contacts.map((contact) => contact.id))
     : { data: [] as ConsentRow[], error: null };
   const consents = (consentsResult.data ?? []) as ConsentRow[];
+  const portalAccessResult = canManageContacts && contacts.length
+    ? await supabase.from("guardian_portal_access").select("patient_contact_id,status,version,claimed_at,revoked_at").in("patient_contact_id", contacts.map((contact) => contact.id))
+    : { data: [] as GuardianPortalAccessRow[], error: null };
+  const portalAccess = (portalAccessResult.data ?? []) as GuardianPortalAccessRow[];
 
   // A clinician scoped to their own caseload cannot open a patient they do
   // not see. Hiding the link is not enough — this is the check that matters.
@@ -152,7 +164,7 @@ export default async function PatientDetailPage({
       </Link>
       {query.error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{query.error}</p>}
       {query.notice && <p role="status" className="rounded-xl bg-[var(--brand-tint)] p-3 text-sm text-[var(--ink-primary)]">{query.notice}</p>}
-      {(contactsResult.error || consentsResult.error) && canViewContacts && (
+      {(contactsResult.error || consentsResult.error || portalAccessResult.error) && canViewContacts && (
         <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">Contact and consent records could not be loaded. No changes were made.</p>
       )}
       {week && null}
@@ -195,6 +207,14 @@ export default async function PatientDetailPage({
           </div>
 
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            {!synthetic && (
+              <Link
+                href={`/api/integrations/ehr/patients/${patientId}/bundle`}
+                className="inline-flex flex-1 items-center justify-center rounded-full border border-[var(--border-ring)] px-4 py-2.5 text-xs font-medium text-[var(--ink-primary)] sm:flex-none"
+              >
+                FHIR export
+              </Link>
+            )}
             {(can(session.role, "schedule.book") || can(session.role, "clinical.set_requirements")) && (
               <Link
                 href={`/patients/${patientId}/care-team`}
@@ -357,6 +377,7 @@ export default async function PatientDetailPage({
             patientTimezone={patient.timezone}
             contacts={contacts}
             consents={consents}
+            portalAccess={portalAccess}
             canManage={canManageContacts}
           />
         )}
@@ -490,12 +511,14 @@ function ContactsCard({
   patientTimezone,
   contacts,
   consents,
+  portalAccess,
   canManage,
 }: {
   patientId: string;
   patientTimezone: string;
   contacts: PatientContactRow[];
   consents: ConsentRow[];
+  portalAccess: GuardianPortalAccessRow[];
   canManage: boolean;
 }) {
   return (
@@ -504,6 +527,7 @@ function ContactsCard({
       <div className="mt-3 space-y-3">
         {contacts.map((contact) => {
           const contactConsents = consents.filter((consent) => consent.patient_contact_id === contact.id);
+          const guardianAccess = portalAccess.find((access) => access.patient_contact_id === contact.id);
           return (
             <article key={contact.id} className="rounded-xl bg-[var(--surface-sunken)] p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -541,6 +565,25 @@ function ContactsCard({
 
               {canManage && (
                 <div className="mt-3 space-y-2">
+                  {contact.is_legal_guardian && (
+                    <details className="rounded-xl border border-[var(--border-ring)] bg-[var(--surface-1)] px-3">
+                      <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 text-xs font-medium text-[var(--brand)]">
+                        <span>Guardian portal access</span>
+                        <span className="text-[0.6875rem] font-normal text-[var(--ink-muted)]">{guardianAccess?.status.toLowerCase() ?? "not approved"}</span>
+                      </summary>
+                      <form action={manageGuardianPortalAccess} className="space-y-3 pb-3">
+                        <input type="hidden" name="patient_id" value={patientId} />
+                        <input type="hidden" name="contact_id" value={contact.id} />
+                        <input type="hidden" name="expected_version" value={guardianAccess?.version ?? 0} />
+                        <p className="text-xs leading-relaxed text-[var(--ink-secondary)]">Read-only access shows scheduled and confirmed appointments for 90 days. The signed-in email must exactly match this contact record.</p>
+                        <Field label="Decision reason"><input required minLength={3} maxLength={500} name="reason" className={inputClass} placeholder={guardianAccess?.status === "ACTIVE" || guardianAccess?.status === "PENDING" ? "Why access is being revoked" : "Authority and identity verification reviewed"} /></Field>
+                        <label className="flex min-h-11 items-start gap-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900"><input required name="confirmed" type="checkbox" className="mt-0.5 size-4"/><span>I verified the legal guardian, approved email, and information-release authority for this decision.</span></label>
+                        {guardianAccess?.status === "ACTIVE" || guardianAccess?.status === "PENDING"
+                          ? <ActionSubmit name="decision" value="REVOKE" tone="danger" pendingLabel="Revoking…">Revoke portal access</ActionSubmit>
+                          : <ActionSubmit name="decision" value="ENABLE" pendingLabel="Approving…">Approve portal access</ActionSubmit>}
+                      </form>
+                    </details>
+                  )}
                   <details className="rounded-xl border border-[var(--border-ring)] bg-[var(--surface-1)] px-3">
                     <summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium text-[var(--brand)]">Edit contact details</summary>
                     <ContactForm patientId={patientId} patientTimezone={patientTimezone} contact={contact} />

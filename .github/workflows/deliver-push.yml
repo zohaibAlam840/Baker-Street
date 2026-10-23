@@ -1,0 +1,55 @@
+name: Deliver push notifications
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: Optional URL override; defaults to the PRODUCTION_URL repository variable
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deliver-production-push
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DEPLOYMENT_URL: ${{ inputs.deployment_url || vars.PRODUCTION_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Validate push worker configuration
+        shell: bash
+        run: |
+          if [[ -z "$DEPLOYMENT_URL" ]]; then
+            echo "Set the PRODUCTION_URL repository variable." >&2
+            exit 1
+          fi
+          if [[ ${#CRON_SECRET} -lt 16 ]]; then
+            echo "Configure the CRON_SECRET repository secret." >&2
+            exit 1
+          fi
+      - name: Deliver queued push notifications
+        shell: bash
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --max-time 90 \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "${DEPLOYMENT_URL%/}/api/push/deliver" \
+            | tee push-delivery.log
+          echo "Push notification delivery completed." >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain failed delivery evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: push-delivery-${{ github.run_id }}
+          path: push-delivery.log
+          if-no-files-found: ignore
+          retention-days: 14

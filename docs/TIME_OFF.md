@@ -52,6 +52,6 @@ Before production, the client should confirm:
 
 Apply `20261022020000_provider_time_off_requests.sql` followed by
 `20261022030000_provider_callout_guard.sql`. The health endpoint then requires
-schema version `20261022040000`, the `provider_time_off` capability, and the
+schema version `20261024010000`, the `provider_time_off` capability, and the
 self-reported callout guard. Run the pgTAP access suite and the staging drill
 in `docs/PRODUCTION_RUNBOOK.md` before routing production traffic to the build.

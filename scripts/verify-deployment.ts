@@ -1,54 +1,80 @@
-const REQUIRED_SCHEMA_VERSION = "20261022040000";
-
-interface HealthBody {
-  status?: string;
-  auth?: string;
-  database?: string;
-  schema_version?: string | null;
-  release?: string;
-}
+import {
+  type HealthBody,
+  healthErrors,
+  protectedRedirectErrors,
+  securityHeaderErrors,
+} from "../lib/deployment/verification";
 
 async function main() {
-  const base = (process.env.DEPLOYMENT_URL ?? process.argv[2] ?? "").replace(/\/$/, "");
-  if (!base) throw new Error("Set DEPLOYMENT_URL or pass the deployed URL.");
+  const rawBase = process.env.DEPLOYMENT_URL ?? process.argv[2] ?? "";
+  if (!rawBase) throw new Error("Set DEPLOYMENT_URL or pass the deployed URL.");
 
-  const health = await fetch(`${base}/api/health`, {
-    redirect: "follow",
+  const base = new URL(rawBase);
+  if (base.protocol !== "https:" && process.env.VERIFY_ALLOW_HTTP !== "true") {
+    throw new Error("Deployment verification requires HTTPS. Set VERIFY_ALLOW_HTTP=true only for a local check.");
+  }
+  base.pathname = "/";
+  base.search = "";
+  base.hash = "";
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  const requestHeaders = bypass
+    ? { "x-vercel-protection-bypass": bypass }
+    : undefined;
+
+  const health = await fetch(new URL("/api/health", base), {
+    headers: requestHeaders,
+    redirect: "error",
     signal: AbortSignal.timeout(10_000),
   });
   const body = (await health.json().catch(() => null)) as HealthBody | null;
-  if (
-    !health.ok ||
-    body?.status !== "ok" ||
-    body.auth !== "available" ||
-    body.database !== "available" ||
-    body.schema_version !== REQUIRED_SCHEMA_VERSION
-  ) {
-    throw new Error(`Health check failed: ${health.status} ${JSON.stringify(body)}`);
-  }
-
-  const page = await fetch(`${base}/login`, { signal: AbortSignal.timeout(10_000) });
-  const required: Record<string, string> = {
-    "x-content-type-options": "nosniff",
-    "x-frame-options": "DENY",
-    "referrer-policy": "strict-origin-when-cross-origin",
-  };
-  for (const [name, expected] of Object.entries(required)) {
-    if (page.headers.get(name) !== expected) {
-      throw new Error(`Missing security header ${name}`);
-    }
-  }
-  if (!page.ok) throw new Error(`Login page failed: ${page.status}`);
-
-  console.log(
-    JSON.stringify({
-      ok: true,
-      url: base,
-      release: body.release,
-      schema_version: body.schema_version,
-      security_headers: true,
-    }),
+  const errors = healthErrors(
+    health.status,
+    body,
+    process.env.EXPECTED_RELEASE_SHA,
   );
+  if (!health.headers.get("content-type")?.includes("application/json")) {
+    errors.push("Health endpoint did not return JSON.");
+  }
+  if (!health.headers.get("cache-control")?.includes("no-store")) {
+    errors.push("Health endpoint must use Cache-Control: no-store.");
+  }
+
+  const login = await fetch(new URL("/login", base), {
+    headers: requestHeaders,
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!login.ok) errors.push(`Login page returned HTTP ${login.status}.`);
+  if (!login.headers.get("content-type")?.includes("text/html")) {
+    errors.push("Login page did not return HTML.");
+  }
+  errors.push(...securityHeaderErrors(login.headers, base.protocol === "https:"));
+  const loginText = await login.text();
+  if (!loginText.includes("Baker Street") || !loginText.includes("Welcome back")) {
+    errors.push("Login page did not contain the expected application shell.");
+  }
+
+  const protectedPage = await fetch(new URL("/dashboard", base), {
+    headers: requestHeaders,
+    redirect: "manual",
+    signal: AbortSignal.timeout(10_000),
+  });
+  const protectedBody = await protectedPage.text();
+  errors.push(...protectedRedirectErrors(
+    base,
+    protectedPage.status,
+    protectedPage.headers.get("location"),
+    protectedBody,
+  ));
+
+  if (errors.length > 0) throw new Error(errors.join("\n"));
+  console.log(JSON.stringify({
+    ok: true,
+    url: base.origin,
+    release: body?.release,
+    schema_version: body?.schema_version,
+    checks: ["health", "schema", "release", "security_headers", "anonymous_redirect"],
+  }));
 }
 
 main().catch((error) => {

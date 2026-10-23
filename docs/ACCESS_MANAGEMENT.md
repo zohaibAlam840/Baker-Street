@@ -45,6 +45,6 @@ Supabase email/password or use the practice's identity provider.
 ## Release verification
 
 Apply `supabase/migrations/20261022040000_user_access_management.sql`. The
-health endpoint then requires schema version `20261022040000` and the
+health endpoint then requires schema version `20261024010000` and the
 `access_management` capability. Run the pgTAP suite and the staging drill in
 `docs/PRODUCTION_RUNBOOK.md` before production use.
