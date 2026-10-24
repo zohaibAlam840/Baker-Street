@@ -1,8 +1,6 @@
 name: Deliver push notifications
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       deployment_url:

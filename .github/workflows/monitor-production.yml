@@ -1,8 +1,6 @@
 name: Monitor production
 
 on:
-  schedule:
-    - cron: "17,47 * * * *"
   workflow_dispatch:
     inputs:
       deployment_url:
